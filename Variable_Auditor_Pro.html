@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Camunda FlowAudit Pro - Audit & Gouvernance des variables</title>
+  <meta name="description"
+    content="Camunda FlowAudit Pro : outil d'audit et de validation des conventions de nommage des variables Camunda BPMN et FEEL. Analyse de conformité, rapports et classement.">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+  <!-- Overlay de chargement (Spinner) -->
+  <div class="loader-overlay" id="loaderOverlay">
+    <div class="loader-container">
+      <div class="spinner-wrapper">
+        <div class="spinner-glow"></div>
+        <div class="spinner-ring"></div>
+        <div class="spinner-ring-inner"></div>
+      </div>
+      <div class="loader-text">Analyse en cours...</div>
+      <div class="loader-sub">Audit des variables Camunda en cours d'exécution</div>
+      <div class="loader-progress">
+        <div class="loader-progress-bar" id="loaderProgressBar"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Écran d'Authentification -->
+  <div class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="login-logo">
+          <img src="img/PDA Camunda.png" alt="PDA Camunda Logo" class="login-logo-img">
+        </div>
+        <h2>Camunda FlowAudit Pro</h2>
+        <p>Gouvernance, Audit & Conformité des variables</p>
+      </div>
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="loginUser">Identifiant</label>
+          <div class="input-wrapper">
+            <svg class="input-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2"
+              fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            <input type="text" id="loginUser" required placeholder="pdacamunda" autocomplete="username">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="loginPass">Mot de passe</label>
+          <div class="input-wrapper">
+            <svg class="input-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2"
+              fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <input type="password" id="loginPass" required placeholder="••••••••" autocomplete="current-password">
+          </div>
+        </div>
+        <div class="login-error" id="loginError" style="display: none;"></div>
+        <button type="submit" class="btn-login">
+          Se connecter
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12" />
+            <polyline points="12 5 19 12 12 19" />
+          </svg>
+        </button>
+      </form>
+      <div class="login-footer">
+        <p>Identifiants par défaut : <strong>pdacamunda</strong> / <strong>pdacamunda</strong></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Conteneur Principal de l'Application -->
+  <div class="app-container" id="appContainer" style="display: none;">
+    <!-- Sidebar Menu Gauche -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-brand">
+          <img src="img/PDA Camunda.png" alt="PDA Camunda Logo" class="brand-logo-img">
+          <div class="brand-text">
+            <!--span class="brand-title">FlowAudit Pro</span-->
+            <span class="brand-subtitle">FlowAudit Pro</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sélecteur de Module -->
+      <div class="module-switcher">
+        <button id="btn-mod-variables" class="mod-btn active" onclick="switchModule('variables')">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 8v4M12 16h.01" />
+          </svg>
+          Variables
+        </button>
+        <button id="btn-mod-subprocesses" class="mod-btn" onclick="switchModule('subprocesses')">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+          </svg>
+          Sous-processus
+        </button>
+      </div>
+
+      <!-- Sidebar Navigation Links (preserves ID and Tab Class logic) -->
+      <nav class="sidebar-nav">
+        <button class="tab active" onclick="switchTab('import')">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <span>Import</span>
+        </button>
+        <button class="tab" onclick="switchTab('config')">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          <span>Configuration</span>
+        </button>
+        <button class="tab" id="resultsTab" onclick="switchTab('results')" style="display:none">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+            <polyline points="10 9 9 9 8 9" />
+          </svg>
+          <span>Résultats</span>
+        </button>
+        <button class="tab" id="dashTab" onclick="switchTab('dashboard')" style="display:none">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="9" />
+            <rect x="14" y="3" width="7" height="5" />
+            <rect x="14" y="12" width="7" height="9" />
+            <rect x="3" y="16" width="7" height="5" />
+          </svg>
+          <span>Tableau de bord</span>
+        </button>
+        <button class="tab" id="graphTab" onclick="switchTab('graph')" style="display:none">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="18" cy="5" r="3" />
+            <circle cx="6" cy="12" r="3" />
+            <circle cx="18" cy="19" r="3" />
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+          </svg>
+          <span>Schéma Relations</span>
+        </button>
+        <button class="tab" id="rankTab" onclick="switchTab('ranking')" style="display:none">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10" />
+            <line x1="12" y1="20" x2="12" y2="4" />
+            <line x1="6" y1="20" x2="6" y2="14" />
+          </svg>
+          <span>Classement</span>
+        </button>
+        <button class="tab" id="histTab" onclick="switchTab('history')">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span>Historique</span>
+        </button>
+
+        <!-- Subprocess Navigation links -->
+        <button class="tab" id="subImportTab" onclick="switchTab('sub-import')" style="display:none">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <span>Import (Sous-proc.)</span>
+        </button>
+        <button class="tab" id="subAnalysisTab" onclick="switchTab('sub-analysis')" style="display:none">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10" />
+            <line x1="12" y1="20" x2="12" y2="4" />
+            <line x1="6" y1="20" x2="6" y2="14" />
+          </svg>
+          <span>Analyse d'Impact</span>
+        </button>
+        <button class="tab" id="subMapTab" onclick="switchTab('sub-map')" style="display:none">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="18" cy="5" r="3" />
+            <circle cx="6" cy="12" r="3" />
+            <circle cx="18" cy="19" r="3" />
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+          </svg>
+          <span>Cartographie</span>
+        </button>
+      </nav>
+
+      <!-- Sidebar Footer -->
+      <div class="sidebar-footer">
+        <div class="user-card">
+          <div class="user-avatar">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+          </div>
+          <div class="user-info">
+            <span class="user-name">pdacamunda</span>
+            <span class="user-role">Administrateur</span>
+          </div>
+          <button class="btn-logout" id="logoutBtn" onclick="handleLogout()" title="Se déconnecter">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </button>
+        </div>
+        <div class="sidebar-footer-logo">
+          <img src="img/PDA Camunda.png" alt="PDA Camunda Logo" class="footer-logo-img">
+        </div>
+        <div class="sidebar-copyright">
+          &copy; 2026 PDA Camunda | FlowAudit Pro
+        </div>
+      </div>
+    </aside>
+
+    <!-- Zone de Contenu Principal -->
+    <main class="main-content">
+      <!-- En-tête de l'application -->
+      <header class="main-header">
+        <div class="header-title-area">
+          <h1 id="pageTitle">Importation des données</h1>
+        </div>
+        <div class="header-actions-wrapper">
+          <div class="header-actions">
+            <select id="themeSelector" class="srt" onchange="changeTheme(this.value)">
+              <option value="theme-sombre">Thème : Sombre</option>
+              <option value="theme-night">Thème : Deep Night</option>
+              <option value="theme-clair">Thème : Clair</option>
+              <option value="theme-cyber">Thème : Cyberpunk</option>
+            </select>
+            <button class="btn-ghost" onclick="loadDemo()">Charger démo</button>
+            <button class="btn-ghost" id="resetBtn" onclick="resetAll()" style="display:none">Réinitialiser</button>
+          </div>
+          <div class="header-divider"></div>
+          <div class="header-logo-container" title="Camunda FlowAudit Pro">
+            <img src="img/camunda.png" alt="Camunda Logo" class="camunda-header-logo">
+          </div>
+        </div>
+      </header>
+
+      <!-- Conteneur des Panneaux -->
+      <div class="panels-container">
+
+        <!-- Panel Import -->
+        <div class="panel active" id="panel-import">
+          <div class="upload-zone" id="dropZone">
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.bpmn,.xml">
+            <svg viewBox="0 0 24 24">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <div class="upload-title" id="uploadTitle">Déposer un fichier Excel, CSV ou BPMN</div>
+            <div class="upload-sub" id="uploadSub">Formats acceptés : .xlsx, .xls, .csv, .bpmn — glissez ou cliquez
+            </div>
+          </div>
+
+          <div class="mapping-section" id="mappingSection">
+            <div class="mapping-title">Mappage des colonnes du fichier</div>
+            <div class="mapping-grid">
+              <div class="mapping-col">
+                <label>Colonne Variable *</label>
+                <select id="colVariable" onchange="updatePreview()"></select>
+              </div>
+              <div class="mapping-col">
+                <label>Processus Parent</label>
+                <select id="colParentProcess" onchange="updatePreview()">
+                  <option value="-1">-- Non défini --</option>
+                </select>
+              </div>
+              <div class="mapping-col">
+                <label>Processus Appelant</label>
+                <select id="colCallingProcess" onchange="updatePreview()">
+                  <option value="-1">-- Non défini --</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="two-col">
+            <div>
+              <div class="input-label">Saisie manuelle (une variable par ligne)</div>
+              <textarea id="manualInput"
+                placeholder="customer_name&#10;Invoice Amount&#10;2ndStep&#10;MonVariable&#10;orderId&#10;prénom_client&#10;processInstanceKey"></textarea>
+              <div class="tip">Collez ici vos noms de variables Camunda directement depuis votre modèle BPMN</div>
+            </div>
+            <div>
+              <div class="input-label">Aperçu rapide des données détectées</div>
+              <div id="previewBox"
+                style="border:1px solid var(--border-color);border-radius:var(--border-radius-md);padding:10px 12px;min-height:120px;font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);background:var(--bg-card);line-height:1.8">
+                <span style="color:var(--text-tertiary)">L'aperçu apparaîtra ici après import d'un fichier...</span>
+              </div>
+              <div class="tip" id="colHint"></div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn-primary" id="analyzeBtn" onclick="analyze()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              Analyser
+            </button>
+            <span style="font-size:12px;color:var(--text-tertiary)" id="countHint"></span>
+          </div>
+        </div>
+
+        <!-- Panel Config -->
+        <div class="panel" id="panel-config">
+          <div class="conf-section">
+            <div class="conf-title">Règles actives</div>
+            <div class="conf-grid" id="rulesGrid"></div>
+          </div>
+          <div class="conf-section" style="margin-top:1.5rem">
+            <div class="conf-title">Mots réservés personnalisés</div>
+            <div class="input-label">Un mot par ligne (s'ajoutera aux réservés FEEL/BPMN)</div>
+            <textarea id="customReserved" style="min-height:90px"
+              placeholder="myCustomKeyword&#10;anotherReserved"></textarea>
+          </div>
+
+
+
+          <div class="two-col" style="margin-top:1.5rem">
+            <div>
+              <div class="conf-title">Gouvernance - Niveaux de Sensibilité</div>
+              <div class="input-label">Un niveau par ligne (ex: Public, Interne, Confidentiel, Critique)</div>
+              <textarea id="sensitivityLevels" style="min-height:90px"
+                placeholder="Public&#10;Interne&#10;Confidentiel&#10;Critique"></textarea>
+            </div>
+            <div>
+              <div class="conf-title">Gouvernance - Équipes Propriétaires (Tags Métier)</div>
+              <div class="input-label">Une équipe par ligne (ex: RH, Finance, Relation Client, Technique)</div>
+              <textarea id="teamTags" style="min-height:90px"
+                placeholder="Non assignée&#10;RH&#10;Finance&#10;Relation Client&#10;Marketing&#10;Technique"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel Results -->
+        <div class="panel" id="panel-results">
+          <div id="statsGrid" class="stats-grid"></div>
+          <div id="scoreBar" class="score-bar"></div>
+          <div class="toolbar" id="toolbarEl"></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="col-orig" onclick="sortBy('name')">Variable <span id="sort-name"></span></th>
+                  <th class="col-st" onclick="sortBy('status')">Statut <span id="sort-status"></span></th>
+                  <th class="col-iss" onclick="sortBy('issues')">Problèmes <span id="sort-issues"></span></th>
+                  <th class="col-sug">Suggestion camelCase</th>
+                  <th class="col-sec">Sécurité &amp; Tags</th>
+                  <th class="col-proc">Proc. Parent</th>
+                  <th class="col-call">Proc. Appelant</th>
+                  <th class="col-act">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+          <div id="emptyMsg" class="empty-state" style="display:none">
+            <div class="empty-icon">◎</div>
+            Aucune variable ne correspond aux filtres actifs
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:15px">
+            <span style="font-size:12px;color:var(--text-tertiary)" id="rowCount"></span>
+            <div id="paginationControls" style="display:flex;align-items:center;gap:8px"></div>
+            <div style="display:flex;gap:8px">
+              <button class="btn-ghost" onclick="exportCSV()">Exporter CSV</button>
+              <button class="btn-ghost" onclick="exportExcel()">Exporter Excel</button>
+              <button class="btn-primary" id="downloadBpmnBtn" onclick="downloadCorrectedBPMN()"
+                style="display:none">Télécharger le BPMN corrigé</button>
+              <button class="apply-all-btn" onclick="applyAllSuggestions()">Appliquer toutes les suggestions</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel Dashboard -->
+        <div class="panel" id="panel-dashboard">
+          <!-- Bandeau de filtres du Tableau de bord -->
+          <div class="dashboard-filters"
+            style="display:flex;gap:16px;margin-bottom:24px;background:var(--bg-card);padding:16px;border-radius:var(--border-radius-md);border:1px solid var(--border-color);align-items:center;flex-wrap:wrap;">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <label class="input-label" style="margin:0;font-size:11px">Filtrer par Processus :</label>
+              <select id="dashFilterProcess" class="srt" onchange="applyDashboardFilters()" style="width:200px">
+                <option value="all">Tous les processus</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <label class="input-label" style="margin:0;font-size:11px">Filtrer par Équipe :</label>
+              <select id="dashFilterTeam" class="srt" onchange="applyDashboardFilters()" style="width:160px">
+                <option value="all">Toutes les équipes</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <label class="input-label" style="margin:0;font-size:11px">Filtrer par Sensibilité :</label>
+              <select id="dashFilterSensitivity" class="srt" onchange="applyDashboardFilters()" style="width:160px">
+                <option value="all">Toutes les sensibilités</option>
+              </select>
+            </div>
+            <button class="btn-ghost" onclick="resetDashboardFilters()"
+              style="margin-top:20px;padding:6px 12px;font-size:12px;height:34px;">
+              Réinitialiser
+            </button>
+          </div>
+
+          <!-- Grille de KPIs -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-title">Score de Conformité</div>
+              <div class="kpi-value" id="kpi-score-val">0%</div>
+              <div class="kpi-status" id="kpi-score-status">N/A</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-title">Couverture de Gouvernance</div>
+              <div class="kpi-value" id="kpi-coverage-val">0%</div>
+              <div class="kpi-status" id="kpi-coverage-status">N/A</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-title">Longueur Moyenne</div>
+              <div class="kpi-value" id="kpi-length-val">0.0 car.</div>
+              <div class="kpi-status" id="kpi-length-status">N/A</div>
+            </div>
+          </div>
+
+          <div class="chart-grid">
+            <div class="chart-card">
+              <div class="chart-title">Répartition des statuts</div>
+              <div class="chart-container">
+                <canvas id="donutChart"></canvas>
+              </div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Problèmes les plus fréquents</div>
+              <div class="chart-container">
+                <canvas id="barChart"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="chart-grid" style="margin-top:1.5rem">
+            <div class="chart-card">
+              <div class="chart-title">Distribution par longueur de nom</div>
+              <div class="chart-container">
+                <canvas id="lineChart"></canvas>
+              </div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Tendance du Score de conformité</div>
+              <div class="chart-container">
+                <canvas id="historyChart"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="chart-grid" style="margin-top:1.5rem">
+            <div class="chart-card">
+              <div class="chart-title">Gouvernance - Sensibilité des variables</div>
+              <div class="chart-container">
+                <canvas id="sensitivityChart"></canvas>
+              </div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Gouvernance - Répartition par Équipe</div>
+              <div class="chart-container">
+                <canvas id="teamChart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel Graph -->
+        <div class="panel" id="panel-graph">
+          <div class="carto-fullscreen-container" id="varsCartoContainer">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;"
+              class="carto-header">
+              <div>
+                <h3 style="font-size:15px;font-weight:600;color:var(--text-primary)">Schéma des relations Processus ➔
+                  Variables</h3>
+                <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Visualisez quelles variables sont
+                  liées à quels processus.</p>
+              </div>
+              <div style="display:flex;gap:12px;align-items:center;">
+                <button class="btn-ghost btn-fullscreen" onclick="toggleFullscreen('varsCartoContainer')">
+                  <svg class="fullscreen-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor"
+                    stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"
+                    style="vertical-align:middle; margin-right:4px;">
+                    <path class="path-enter"
+                      d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                    <path class="path-exit" style="display:none;"
+                      d="M3 8h3a2 2 0 0 0 2-2V3m13 3h-3a2 2 0 0 0-2 2v3m0 10v-3a2 2 0 0 1 2-2h3M8 21v-3a2 2 0 0 0-2-2H3" />
+                  </svg>
+                  <span class="fullscreen-text-enter">Plein écran</span>
+                  <span class="fullscreen-text-exit" style="display:none;">Quitter</span>
+                </button>
+                <div
+                  style="display:flex;gap:15px;font-size:11px;align-items:center;background:var(--bg-card);padding:8px 12px;border-radius:var(--border-radius-md);border:1px solid var(--border-color);">
+                  <span style="display:flex;align-items:center;gap:6px"><span
+                      style="width:14px;height:14px;background:#004F9F;border-radius:3px;display:inline-block"></span>
+                    Processus</span>
+                  <span style="display:flex;align-items:center;gap:6px"><span
+                      style="width:14px;height:14px;background:#10b981;border-radius:50%;display:inline-block"></span>
+                    Var. Conforme</span>
+                  <span style="display:flex;align-items:center;gap:6px"><span
+                      style="width:14px;height:14px;background:#ef4444;border-radius:50%;display:inline-block"></span>
+                    Var. Non Conforme</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="carto-body">
+              <div class="carto-filters"
+                style="display:flex;gap:20px;margin-bottom:15px;background:var(--bg-card);padding:15px;border-radius:var(--border-radius-md);border:1px solid var(--border-color);align-items:flex-start;flex-wrap:wrap;">
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <label style="font-size:12px;font-weight:600;color:var(--text-secondary)">Filtrer par Processus
+                    :</label>
+                  <div class="searchable-list">
+                    <input type="text" class="searchable-list-input" id="searchProcInput"
+                      placeholder="Rechercher un processus..." onkeyup="filterCheckboxes('procList', this.value)">
+                    <div class="searchable-list-items" id="procList"></div>
+                  </div>
+                </div>
+
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <label style="font-size:12px;font-weight:600;color:var(--text-secondary)">Filtrer par Variables
+                    :</label>
+                  <div class="searchable-list">
+                    <input type="text" class="searchable-list-input" id="searchVarInput"
+                      placeholder="Rechercher une variable..." onkeyup="filterCheckboxes('varList', this.value)">
+                    <div class="searchable-list-items" id="varList"></div>
+                  </div>
+                </div>
+
+                <div style="display:flex;flex-direction:column;gap:12px;margin-top:20px;flex:1;">
+                  <label
+                    style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;color:var(--text-primary);font-weight:500;">
+                    <input type="checkbox" id="graphNonConformOnly" onchange="renderGraph()"
+                      style="width:16px;height:16px;accent-color:var(--err);cursor:pointer;">
+                    Afficher uniquement les variables non conformes (Erreurs & Avertissements)
+                  </label>
+                  <div style="display:flex;gap:8px;margin-top:auto;">
+                    <button class="btn-primary" onclick="renderGraph()">Appliquer les filtres</button>
+                    <button class="btn-ghost" onclick="resetGraphFilters()">Réinitialiser tout</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="carto-graph-wrapper">
+                <div id="networkGraph"
+                  style="height: 600px; border: 1px solid var(--border-color); border-radius: var(--border-radius-md); background: var(--bg-card); overflow:hidden;">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel Ranking -->
+        <div class="panel" id="panel-ranking">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+            <div>
+              <h3 style="font-size:15px;font-weight:600;color:var(--text-primary)">Classement d'utilisation des
+                variables</h3>
+              <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Visualisez les variables les plus
+                fréquemment utilisées et leurs processus associés.</p>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn-primary" onclick="exportRankingCSV()">
+                Exporter le classement (CSV)
+              </button>
+            </div>
+          </div>
+
+          <div class="stats-grid" id="rankingStatsGrid" style="margin-bottom: 1.5rem;">
+            <!-- Rempli dynamiquement -->
+          </div>
+
+          <div class="chart-card" style="margin-bottom: 1.5rem;">
+            <div class="chart-title">Top 10 des variables les plus utilisées</div>
+            <div class="chart-container" style="height: 280px; position: relative;">
+              <canvas id="rankingChart"></canvas>
+            </div>
+          </div>
+
+          <div
+            style="background:var(--bg-card);padding:12px 15px;border-radius:var(--border-radius-md);border:1px solid var(--border-color);margin-bottom:15px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <input class="srch" placeholder="Rechercher une variable..." id="rankingSearchInput"
+              oninput="onRankingSearch()" style="width:220px">
+
+            <select class="srt" id="rankingStatusFilter" onchange="onRankingFilterChange()">
+              <option value="all">Tous les statuts</option>
+              <option value="valid">Conformes uniquement</option>
+              <option value="invalid">Non conformes uniquement</option>
+              <option value="warn">Avertissements uniquement</option>
+            </select>
+
+            <select class="srt" id="rankingSortSel" onchange="onRankingSortChange()">
+              <option value="rank">Trier par : Classement (Fréquence)</option>
+              <option value="name">Trier par : Nom de variable</option>
+              <option value="processes">Trier par : Nombre de processus</option>
+            </select>
+
+            <select class="srt" id="rankingLimitSel" onchange="onRankingFilterChange()" style="margin-left:auto;">
+              <option value="10">Afficher : Top 10</option>
+              <option value="25">Afficher : Top 25</option>
+              <option value="50" selected>Afficher : Top 50</option>
+              <option value="all">Afficher : Tout</option>
+            </select>
+          </div>
+
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 8%; text-align: center;">Rang</th>
+                  <th style="width: 25%">Variable</th>
+                  <th style="width: 15%">Nombre d'utilisations</th>
+                  <th style="width: 20%">Fréquence relative</th>
+                  <th style="width: 12%">Statut</th>
+                  <th style="width: 20%">Processus associés</th>
+                </tr>
+              </thead>
+              <tbody id="rankingTableBody"></tbody>
+            </table>
+          </div>
+
+          <div id="rankingEmptyMsg" class="empty-state" style="display:none">
+            <div class="empty-icon">◎</div>
+            Aucune variable ne correspond aux critères du classement.
+          </div>
+        </div>
+
+        <!-- Panel History -->
+        <div class="panel" id="panel-history">
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom: 1rem;">
+            <button class="btn-primary" onclick="exportHistoryToFile()">Sauvegarder l'historique complet (JSON)</button>
+            <button class="btn-ghost" onclick="clearHistory()">Effacer tout l'historique</button>
+          </div>
+          <div id="historyList" class="history-list">
+            <div class="empty-state" style="padding:2rem">
+              <div class="empty-icon">◷</div>
+              Aucune analyse enregistrée
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel Subprocess Import -->
+        <div class="panel" id="panel-sub-import">
+          <div class="upload-zone" id="dropZoneSub">
+            <input type="file" id="fileInputSub" accept=".xlsx,.xls,.csv,.bpmn,.xml">
+            <svg viewBox="0 0 24 24">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <div class="upload-title" id="uploadTitleSub">Déposer un fichier Excel, CSV ou BPMN</div>
+            <div class="upload-sub" id="uploadSubSub">Relations de processus : parent et sous-processus — glissez ou
+              cliquez</div>
+          </div>
+
+          <div class="mapping-section" id="mappingSectionSub" style="display:none">
+            <div class="mapping-title">Mappage des colonnes du fichier</div>
+            <div class="mapping-grid">
+              <div class="mapping-col">
+                <label>Colonne Processus Parent *</label>
+                <select id="colSubParent" onchange="updateSubPreview()"></select>
+              </div>
+              <div class="mapping-col">
+                <label>Colonne Sous-processus Appelé *</label>
+                <select id="colSubChild" onchange="updateSubPreview()"></select>
+              </div>
+              <div class="mapping-col">
+                <label>ID d'Élément (Optionnel)</label>
+                <select id="colSubElementId" onchange="updateSubPreview()">
+                  <option value="-1">-- Non défini --</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="two-col">
+            <div>
+              <div class="input-label">Saisie manuelle (format : `processus_parent;sous_processus` par ligne)</div>
+              <textarea id="manualInputSub" style="height:120px"
+                placeholder="processus_parent_1;sous_processus_A&#10;processus_parent_1;sous_processus_B&#10;sous_processus_A;sous_processus_B_nested"></textarea>
+              <div class="tip">Saisissez les relations hiérarchiques directement (séparateur point-virgule)</div>
+            </div>
+            <div>
+              <div class="input-label">Aperçu rapide des relations détectées</div>
+              <div id="previewBoxSub"
+                style="border:1px solid var(--border-color);border-radius:var(--border-radius-md);padding:10px 12px;min-height:120px;font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);background:var(--bg-card);line-height:1.8">
+                <span style="color:var(--text-tertiary)">L'aperçu apparaîtra ici après import d'un fichier...</span>
+              </div>
+              <div class="tip" id="colHintSub"></div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn-primary" id="analyzeSubBtn" onclick="analyzeSubprocesses()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              Analyser l'Impact
+            </button>
+            <span style="font-size:12px;color:var(--text-tertiary)" id="countHintSub"></span>
+          </div>
+        </div>
+
+        <!-- Panel Subprocess Analysis -->
+        <div class="panel" id="panel-sub-analysis">
+          <div class="kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
+            <div class="kpi-card">
+              <div class="kpi-title">Relations Totales</div>
+              <div class="kpi-value" id="kpi-sub-total">0</div>
+              <div class="kpi-status" id="kpi-sub-total-status">N/A</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-title">Processus Parents</div>
+              <div class="kpi-value" id="kpi-sub-parents">0</div>
+              <div class="kpi-status" id="kpi-sub-parents-status">N/A</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-title">Sous-processus uniques</div>
+              <div class="kpi-value" id="kpi-sub-children">0</div>
+              <div class="kpi-status" id="kpi-sub-children-status">N/A</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-title">Boucles Circulaires</div>
+              <div class="kpi-value" id="kpi-sub-loops" style="color:var(--err-dark)">0</div>
+              <div class="kpi-status" id="kpi-sub-loops-status">N/A</div>
+            </div>
+          </div>
+
+          <div
+            style="background:var(--bg-card);padding:12px 15px;border-radius:var(--border-radius-md);border:1px solid var(--border-color);margin-bottom:15px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <input class="srch" placeholder="Rechercher un processus..." id="subSearchInput" oninput="onSubSearch()"
+              style="width:220px">
+
+            <select class="srt" id="subLoopFilter" onchange="onSubFilterChange()">
+              <option value="all">Toutes les relations</option>
+              <option value="loop">Dans une boucle circulaire</option>
+              <option value="noLoop">Sans boucle</option>
+            </select>
+
+            <select class="srt" id="subSortSel" onchange="onSubSortChange()">
+              <option value="impact">Trier par : Impact (Nb Parents appelants)</option>
+              <option value="name">Trier par : Nom de sous-processus</option>
+            </select>
+          </div>
+
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 25%" onclick="subSortBy('name')">Sous-processus</th>
+                  <th style="width: 15%" onclick="subSortBy('impact')">Impact (Appels)</th>
+                  <th style="width: 40%">Processus Parents Appelants</th>
+                  <th style="width: 20%">Statut / Problèmes</th>
+                </tr>
+              </thead>
+              <tbody id="subTableBody"></tbody>
+            </table>
+          </div>
+
+          <div id="subEmptyMsg" class="empty-state" style="display:none">
+            <div class="empty-icon">◎</div>
+            Aucun sous-processus ne correspond aux filtres.
+          </div>
+        </div>
+
+        <!-- Panel Subprocess Map -->
+        <div class="panel" id="panel-sub-map">
+          <div class="carto-fullscreen-container" id="subCartoContainer">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;"
+              class="carto-header">
+              <div>
+                <h3 style="font-size:15px;font-weight:600;color:var(--text-primary)">Cartographie des Call Activities
+                  (Relations d'Appel)</h3>
+                <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Visualisez l'arborescence des
+                  processus et sous-processus.</p>
+              </div>
+              <div style="display:flex;gap:12px;align-items:center;">
+                <button class="btn-ghost btn-fullscreen" onclick="toggleFullscreen('subCartoContainer')">
+                  <svg class="fullscreen-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor"
+                    stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"
+                    style="vertical-align:middle; margin-right:4px;">
+                    <path class="path-enter"
+                      d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                    <path class="path-exit" style="display:none;"
+                      d="M3 8h3a2 2 0 0 0 2-2V3m13 3h-3a2 2 0 0 0-2 2v3m0 10v-3a2 2 0 0 1 2-2h3M8 21v-3a2 2 0 0 0-2-2H3" />
+                  </svg>
+                  <span class="fullscreen-text-enter">Plein écran</span>
+                  <span class="fullscreen-text-exit" style="display:none;">Quitter</span>
+                </button>
+                <div
+                  style="display:flex;gap:15px;font-size:11px;align-items:center;background:var(--bg-card);padding:8px 12px;border-radius:var(--border-radius-md);border:1px solid var(--border-color);">
+                  <span style="display:flex;align-items:center;gap:6px"><span
+                      style="width:14px;height:14px;background:#004f9f;border-radius:3px;display:inline-block"></span>
+                    Parent</span>
+                  <span style="display:flex;align-items:center;gap:6px"><span
+                      style="width:14px;height:14px;background:#10b981;border-radius:3px;display:inline-block"></span>
+                    Sous-processus</span>
+                  <span style="display:flex;align-items:center;gap:6px"><span
+                      style="width:14px;height:14px;background:#ef4444;border-radius:3px;display:inline-block"></span>
+                    Loop Circulaire</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="carto-body">
+              <div class="carto-filters"
+                style="background:var(--bg-card);padding:15px;border-radius:var(--border-radius-md);border:1px solid var(--border-color);margin-bottom:15px;display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <label style="font-size:12px;font-weight:600;color:var(--text-secondary)">Filtrer par Processus Parent
+                    :</label>
+                  <div class="searchable-list">
+                    <input type="text" class="searchable-list-input" id="searchSubParentInput"
+                      placeholder="Rechercher un parent..." onkeyup="filterCheckboxes('subParentList', this.value)">
+                    <div class="searchable-list-items" id="subParentList"></div>
+                  </div>
+                </div>
+
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <label style="font-size:12px;font-weight:600;color:var(--text-secondary)">Filtrer par Sous-processus
+                    :</label>
+                  <div class="searchable-list">
+                    <input type="text" class="searchable-list-input" id="searchSubChildInput"
+                      placeholder="Rechercher un sous-processus..."
+                      onkeyup="filterCheckboxes('subChildList', this.value)">
+                    <div class="searchable-list-items" id="subChildList"></div>
+                  </div>
+                </div>
+
+                <div style="display:flex;flex-direction:column;gap:12px;margin-top:20px;flex:1;">
+                  <label
+                    style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;color:var(--text-primary);font-weight:500;">
+                    <input type="checkbox" id="subGraphLoopsOnly" onchange="renderSubprocessMap()"
+                      style="width:16px;height:16px;accent-color:var(--err);cursor:pointer;">
+                    Afficher uniquement les boucles circulaires et leurs membres
+                  </label>
+                  <div style="display:flex;gap:8px;margin-top:auto;">
+                    <button class="btn-primary" onclick="renderSubprocessMap()">Appliquer les filtres</button>
+                    <button class="btn-ghost" onclick="resetSubGraphFilters()">Réinitialiser tout</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="carto-graph-wrapper">
+                <div id="subNetworkGraph"
+                  style="height: 600px; border: 1px solid var(--border-color); border-radius: var(--border-radius-md); background: var(--bg-card); overflow:hidden;">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/rules.js"></script>
+  <script src="js/app.js"></script>
+</body>
+
+</html>
