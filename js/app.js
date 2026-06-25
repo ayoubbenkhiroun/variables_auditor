@@ -26,7 +26,7 @@ let currentRankingLimit = '50';
 let rankingChart = null;
 
 // ---------- Module & Subprocess State Variables ----------
-let currentModule = 'variables'; // 'variables' or 'subprocesses'
+let currentModule = 'variables'; // 'variables', 'subprocesses', 'bpmn-naming' or 'pmg'
 let allSubprocessRows = [];
 let filteredSubprocessRows = [];
 let rawSubprocessFileData = [];
@@ -338,17 +338,17 @@ function renderTable(){
       <tr>
         <td><span class="mono">${esc(r.name)}</span></td>
         <td><span class="badge ${r.status==='valid'?'ok':r.status==='warn'?'warn':'err'}">${stLabel[r.status]}</span></td>
-        <td>${r.issues.length?`<div class="iss-list">${r.issues.map(iss=>`<div class="iss-item"><span class="iss-dot ${iss.sev==='warn'?'w':''}">●</span>${esc(iss.msg)}</div>`).join('')}</div>`:'<span style="color:var(--color-text-tertiary);font-size:11px">—</span>'}</td>
-        <td>${r.status!=='valid'?`<input type="text" value="${esc(r.editedSuggestion)}" onchange="updateSug(${globalIdx},this.value)" style="border:0.5px solid var(--color-border-tertiary);border-radius:4px;padding:3px 6px;font-size:11px;font-family:var(--font-mono,monospace);width:100%;background:var(--color-background-secondary);color:var(--ok-dark)">`:'<span style="color:var(--color-text-tertiary);font-size:11px">—</span>'}</td>
+        <td>${r.issues.length?`<div class="iss-list">${r.issues.map(iss=>`<div class="iss-item"><span class="iss-dot ${iss.sev==='warn'?'w':''}">●</span>${esc(iss.msg)}</div>`).join('')}</div>`:'<span style="color:var(--text-tertiary);font-size:11px">—</span>'}</td>
+        <td>${r.status!=='valid'?`<input type="text" class="sug-input" value="${esc(r.editedSuggestion)}" onchange="updateSug(${globalIdx},this.value)">`:'<span style="color:var(--text-tertiary);font-size:11px">—</span>'}</td>
         <td>
           <div class="gov-select-container">
             ${sensSelectHTML}
             ${teamSelectHTML}
           </div>
         </td>
-        <td><span style="font-size:11px;color:var(--color-text-secondary)">${esc(r.parentProcess||'')}</span></td>
-        <td><span style="font-size:11px;color:var(--color-text-secondary)">${esc(r.callingProcess||'')}</span></td>
-        <td>${r.status!=='valid'&&r.editedSuggestion?`<button class="copy-btn" onclick="copySug(this,'${esc(r.editedSuggestion)}')">Copier</button>`:'<span style="font-size:11px;color:var(--color-text-tertiary)">—</span>'}</td>
+        <td><span style="font-size:11px;color:var(--text-secondary)">${esc(r.parentProcess||'')}</span></td>
+        <td><span style="font-size:11px;color:var(--text-secondary)">${esc(r.callingProcess||'')}</span></td>
+        <td>${r.status!=='valid'&&r.editedSuggestion?`<button class="copy-btn" onclick="copySug(this,'${esc(r.editedSuggestion)}')">Copier</button>`:'<span style="font-size:11px;color:var(--text-tertiary)">—</span>'}</td>
       </tr>
     `;
   }).join('');
@@ -367,7 +367,7 @@ function renderPagination(totalPages) {
       <option value="100" ${itemsPerPage==100?'selected':''}>100 / page</option>
     </select>
     <button class="btn-ghost" style="padding:4px 8px" onclick="changePage(currentPage - 1)" ${currentPage === 1 ? 'disabled' : ''}>Préc.</button>
-    <span style="font-size:12px; font-weight:500; color:var(--color-text-secondary);"> ${currentPage} / ${totalPages} </span>
+    <span style="font-size:12px; font-weight:500; color:var(--text-secondary);"> ${currentPage} / ${totalPages} </span>
     <button class="btn-ghost" style="padding:4px 8px" onclick="changePage(currentPage + 1)" ${currentPage === totalPages ? 'disabled' : ''}>Suiv.</button>
   `;
 }
@@ -1064,7 +1064,13 @@ function switchTab(name){
     'history': 'Historique des audits',
     'sub-import': 'Importation des Sous-processus',
     'sub-analysis': 'Analyse d\'Impact des Sous-processus',
-    'sub-map': 'Cartographie des Call Activities'
+    'sub-map': 'Cartographie des Call Activities',
+    'bpmn-naming-import': 'Importation du BPMN (Nommage)',
+    'bpmn-naming-config': 'Configuration des Règles de Nommage',
+    'bpmn-naming-results': 'Rapport d\'Audit de Nommage BPMN',
+    'pmg-import': 'Importation du BPMN (PMG)',
+    'pmg-dashboard': 'Étude & Gouvernance PMG',
+    'pmg-matrix': 'Matrice des Activités PMG'
   };
   const pageTitleEl = document.getElementById('pageTitle');
   if (pageTitleEl && titles[name]) {
@@ -1125,14 +1131,14 @@ function updatePreview(){
       if(colParentIdx >= 0 && row[colParentIdx]) details.push(`Parent: ${row[colParentIdx]}`);
       if(colCallIdx >= 0 && row[colCallIdx]) details.push(`Appelant: ${row[colCallIdx]}`);
 
-      previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(varName)}</strong> <span style="color:var(--color-text-tertiary);font-size:10px">${details.join(' | ')}</span></div>`;
+      previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(varName)}</strong> <span style="color:var(--text-tertiary);font-size:10px">${details.join(' | ')}</span></div>`;
       validCount++;
     }
   }
 
   const totalVars = rawFileData.filter(r => r[colVarIdx] && String(r[colVarIdx]).trim() !== '').length;
 
-  document.getElementById('previewBox').innerHTML = previewHTML || '<span style="color:var(--color-text-tertiary)">Aucune donnée à afficher avec ce mappage...</span>';
+  document.getElementById('previewBox').innerHTML = previewHTML || '<span style="color:var(--text-tertiary)">Aucune donnée à afficher avec ce mappage...</span>';
   document.getElementById('colHint').textContent = `Mappage configuré.`;
   document.getElementById('countHint').textContent = `${totalVars} variables détectées`;
 }
@@ -1231,10 +1237,10 @@ function updateBPMNPreview(){
     let details = [];
     if(r.parentProcess) details.push(`Proc: ${r.parentProcess}`);
     if(r.callingProcess) details.push(`Elément: ${r.callingProcess}`);
-    previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(r.name)}</strong> <span style="color:var(--color-text-tertiary);font-size:10px">${details.join(' | ')}</span></div>`;
+    previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(r.name)}</strong> <span style="color:var(--text-tertiary);font-size:10px">${details.join(' | ')}</span></div>`;
   }
   
-  document.getElementById('previewBox').innerHTML = previewHTML || '<span style="color:var(--color-text-tertiary)">Aucune variable trouvée dans le BPMN...</span>';
+  document.getElementById('previewBox').innerHTML = previewHTML || '<span style="color:var(--text-tertiary)">Aucune variable trouvée dans le BPMN...</span>';
 }
 
 function extractBPMNVariables(xmlDoc) {
@@ -1587,7 +1593,7 @@ function resetAll(){
   document.getElementById('manualInput').value='';
   document.getElementById('uploadTitle').textContent='Déposer un fichier Excel, CSV ou BPMN';
   document.getElementById('uploadSub').textContent='Formats acceptés : .xlsx, .xls, .csv, .bpmn — glissez ou cliquez';
-  document.getElementById('previewBox').innerHTML='<span style="color:var(--color-text-tertiary)">L\'aperçu apparaîtra ici après import d\'un fichier...</span>';
+  document.getElementById('previewBox').innerHTML='<span style="color:var(--text-tertiary)">L\'aperçu apparaîtra ici après import d\'un fichier...</span>';
   document.getElementById('countHint').textContent='';
   document.getElementById('mappingSection').style.display='none';
   document.getElementById('resultsTab').style.display='none';
@@ -1801,12 +1807,12 @@ function renderRankingChart(fullRanking) {
       scales: {
         x: {
           beginAtZero: true,
-          grid: { color: 'var(--color-border-tertiary)' },
-          ticks: { stepSize: 1, color: 'var(--color-text-secondary)' }
+          grid: { color: 'var(--border-color)' },
+          ticks: { stepSize: 1, color: 'var(--text-secondary)' }
         },
         y: {
           grid: { display: false },
-          ticks: { color: 'var(--color-text-primary)', font: { weight: 'bold' } }
+          ticks: { color: 'var(--text-primary)', font: { weight: 'bold' } }
         }
       }
     }
@@ -1867,13 +1873,13 @@ function renderRankingTableOnly(providedRanking) {
     if (r.rank === 1) rankBadge = '<span style="font-size:18px;margin-right:2px;">🥇</span>';
     else if (r.rank === 2) rankBadge = '<span style="font-size:18px;margin-right:2px;">🥈</span>';
     else if (r.rank === 3) rankBadge = '<span style="font-size:18px;margin-right:2px;">🥉</span>';
-    else rankBadge = `<span style="font-weight:600; color:var(--color-text-secondary); padding: 2px 6px;">#${r.rank}</span>`;
+    else rankBadge = `<span style="font-weight:600; color:var(--text-secondary); padding: 2px 6px;">#${r.rank}</span>`;
 
     const widthPercent = Math.max(5, (r.count / maxFreq) * 100);
 
     const procBadges = r.processes.length > 0 
-      ? r.processes.map(p => `<span class="badge" style="background:#e0eef8;color:var(--brand-dark);border:0.5px solid var(--color-border-tertiary);margin:1px;font-size:10px;">${esc(p)}</span>`).join(' ') 
-      : '<span style="color:var(--color-text-tertiary);font-size:11px">—</span>';
+      ? r.processes.map(p => `<span class="badge badge-process">${esc(p)}</span>`).join(' ') 
+      : '<span style="color:var(--text-tertiary);font-size:11px">—</span>';
 
     return `
       <tr>
@@ -1881,7 +1887,7 @@ function renderRankingTableOnly(providedRanking) {
         <td style="vertical-align: middle;"><span class="mono" style="font-weight:600;">${esc(r.name)}</span></td>
         <td style="vertical-align: middle; font-weight: 500;">${r.count} fois</td>
         <td style="vertical-align: middle;">
-          <div style="width: 100%; height: 8px; background: var(--color-border-tertiary); border-radius: 4px; overflow: hidden; max-width: 150px;">
+          <div style="width: 100%; height: 8px; background: var(--border-color); border-radius: 4px; overflow: hidden; max-width: 150px;">
             <div style="width: ${widthPercent}%; height: 100%; background: linear-gradient(90deg, var(--brand-primary) 0%, var(--brand-dark) 100%); border-radius: 4px;"></div>
           </div>
         </td>
@@ -1963,6 +1969,7 @@ function checkAuth() {
   if (isLoggedIn) {
     if (loginScreen) loginScreen.style.display = 'none';
     if (appContainer) appContainer.style.display = 'flex';
+    switchModule(currentModule);
   } else {
     if (loginScreen) loginScreen.style.display = 'flex';
     if (appContainer) appContainer.style.display = 'none';
@@ -2007,16 +2014,34 @@ window.handleLogout = function() {
 window.switchModule = function(moduleName) {
   currentModule = moduleName;
   
-  // Mettre à jour les boutons du sélecteur
+  // Mettre à jour les boutons du sélecteur (en-têtes de catégorie)
   const btnVars = document.getElementById('btn-mod-variables');
   const btnSubs = document.getElementById('btn-mod-subprocesses');
+  const btnBpmn = document.getElementById('btn-mod-bpmn-naming');
+  const btnPmg = document.getElementById('btn-mod-pmg');
   if (btnVars) btnVars.classList.toggle('active', moduleName === 'variables');
   if (btnSubs) btnSubs.classList.toggle('active', moduleName === 'subprocesses');
+  if (btnBpmn) btnBpmn.classList.toggle('active', moduleName === 'bpmn-naming');
+  if (btnPmg) btnPmg.classList.toggle('active', moduleName === 'pmg');
+
+  // Mettre à jour l'expansion des groupes de menu
+  const groupVars = document.getElementById('group-variables');
+  const groupSubs = document.getElementById('group-subprocesses');
+  const groupBpmn = document.getElementById('group-bpmn-naming');
+  const groupPmg = document.getElementById('group-pmg');
+  if (groupVars) groupVars.classList.toggle('expanded', moduleName === 'variables');
+  if (groupSubs) groupSubs.classList.toggle('expanded', moduleName === 'subprocesses');
+  if (groupBpmn) groupBpmn.classList.toggle('expanded', moduleName === 'bpmn-naming');
+  if (groupPmg) groupPmg.classList.toggle('expanded', moduleName === 'pmg');
 
   // Onglets variables
   const varTabIds = ['import', 'config', 'resultsTab', 'dashTab', 'graphTab', 'rankTab', 'histTab'];
   // Onglets sous-processus
   const subTabIds = ['subImportTab', 'subAnalysisTab', 'subMapTab'];
+  // Onglets nommage BPMN
+  const bpmnTabIds = ['bpmnNamingImportTab', 'bpmnNamingConfigTab', 'bpmnNamingResultsTab'];
+  // Onglets PMG
+  const pmgTabIds = ['pmgImportTab', 'pmgMatrixTab'];
 
   // Afficher / masquer les onglets de la sidebar
   varTabIds.forEach(id => {
@@ -2049,11 +2074,51 @@ window.switchModule = function(moduleName) {
     }
   });
 
+  bpmnTabIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      if (moduleName === 'bpmn-naming') {
+        if (id === 'bpmnNamingResultsTab') {
+          el.style.display = (window.bpmnNamingElements && window.bpmnNamingElements.length > 0) ? '' : 'none';
+        } else {
+          el.style.display = '';
+        }
+      } else {
+        el.style.display = 'none';
+      }
+    }
+  });
+
+  pmgTabIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      if (moduleName === 'pmg') {
+        if (id === 'pmgMatrixTab') {
+          el.style.display = (window.pmgActivities && window.pmgActivities.length > 0) ? '' : 'none';
+        } else {
+          el.style.display = '';
+        }
+      } else {
+        el.style.display = '';
+      }
+    } else {
+      el.style.display = 'none';
+    }
+  });
+
   // Basculer sur l'onglet par défaut du module
   if (moduleName === 'variables') {
     switchTab('import');
-  } else {
+  } else if (moduleName === 'subprocesses') {
     switchTab('sub-import');
+  } else if (moduleName === 'bpmn-naming') {
+    switchTab('bpmn-naming-import');
+    initBpmnNamingModule();
+  } else if (moduleName === 'pmg') {
+    switchTab('pmg-import');
+    if (typeof initPmgModule === 'function') {
+      initPmgModule();
+    }
   }
 }
 
@@ -2141,7 +2206,7 @@ window.updateSubPreview = function() {
   const colElementIdIdx = parseInt(document.getElementById('colSubElementId').value, 10);
 
   if (isNaN(colParentIdx) || isNaN(colChildIdx) || colParentIdx < 0 || colChildIdx < 0) {
-    document.getElementById('previewBoxSub').innerHTML = '<span style="color:var(--color-text-tertiary)">Sélectionnez les colonnes requises...</span>';
+    document.getElementById('previewBoxSub').innerHTML = '<span style="color:var(--text-tertiary)">Sélectionnez les colonnes requises...</span>';
     return;
   }
 
@@ -2157,13 +2222,13 @@ window.updateSubPreview = function() {
       let details = [];
       if(colElementIdIdx >= 0 && row[colElementIdIdx]) details.push(`ID: ${row[colElementIdIdx]}`);
 
-      previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(parentVal)}</strong> ➔ <strong style="color:#10b981">${esc(childVal)}</strong> <span style="color:var(--color-text-tertiary);font-size:10px">${details.join(' | ')}</span></div>`;
+      previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(parentVal)}</strong> ➔ <strong style="color:#10b981">${esc(childVal)}</strong> <span style="color:var(--text-tertiary);font-size:10px">${details.join(' | ')}</span></div>`;
     }
   }
 
   const totalRows = rawSubprocessFileData.filter(r => r[colParentIdx] && r[colChildIdx]).length;
 
-  document.getElementById('previewBoxSub').innerHTML = previewHTML || '<span style="color:var(--color-text-tertiary)">Aucune relation détectée...</span>';
+  document.getElementById('previewBoxSub').innerHTML = previewHTML || '<span style="color:var(--text-tertiary)">Aucune relation détectée...</span>';
   document.getElementById('colHintSub').textContent = `Mappage configuré.`;
   document.getElementById('countHintSub').textContent = `${totalRows} relations détectées`;
 }
@@ -2236,9 +2301,9 @@ function handleBPMNSubprocessFile(file) {
       const count = Math.min(allSubprocessRows.length, 5);
       for(let i=0; i<count; i++){
         const r = allSubprocessRows[i];
-        previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(r.parentProcess)}</strong> ➔ <strong style="color:#10b981">${esc(r.subprocess)}</strong> <span style="color:var(--color-text-tertiary);font-size:10px">(${esc(r.elementId)})</span></div>`;
+        previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(r.parentProcess)}</strong> ➔ <strong style="color:#10b981">${esc(r.subprocess)}</strong> <span style="color:var(--text-tertiary);font-size:10px">(${esc(r.elementId)})</span></div>`;
       }
-      document.getElementById('previewBoxSub').innerHTML = previewHTML || '<span style="color:var(--color-text-tertiary)">Aucun Call Activity trouvé...</span>';
+      document.getElementById('previewBoxSub').innerHTML = previewHTML || '<span style="color:var(--text-tertiary)">Aucun Call Activity trouvé...</span>';
 
     } catch(err) {
       console.error("Erreur de lecture BPMN", err);
@@ -2455,7 +2520,7 @@ function renderSubprocessTable() {
 
   tbody.innerHTML = uniqueSubs.map(sub => {
     const parentBadges = Array.from(sub.parents).map(p => 
-      `<span class="badge" style="background:#e0eef8;color:var(--brand-dark);border:0.5px solid var(--color-border-tertiary);margin:1px;font-size:10px;">${esc(p)}</span>`
+      `<span class="badge badge-process">${esc(p)}</span>`
     ).join(' ');
 
     let statusBadge = '<span class="badge ok">Sain</span>';
@@ -2475,7 +2540,7 @@ function renderSubprocessTable() {
       <tr>
         <td><strong class="mono">${esc(sub.name)}</strong></td>
         <td><span style="font-weight:600;">${sub.parents.size} parent(s)</span></td>
-        <td>${parentBadges || '<span style="color:var(--color-text-tertiary);font-size:11px">— (Orphelin)</span>'}</td>
+        <td>${parentBadges || '<span style="color:var(--text-tertiary);font-size:11px">— (Orphelin)</span>'}</td>
         <td>
           <div style="display:flex; flex-direction:column; gap:4px">
             ${statusBadge}
@@ -2757,6 +2822,702 @@ document.addEventListener('fullscreenchange', () => {
     }
   });
 });
+
+// ==========================================
+//   BPMN NAMING AUDIT ENGINE & UI LOGIC
+// ==========================================
+
+// Global State
+window.bpmnNamingElements = [];
+window.filteredBpmnNamingElements = [];
+window.bpmnNamingXmlDoc = null;
+window.bpmnNamingFileName = "";
+window.bpmnNamingFilter = 'all';
+window.bpmnNamingSearch = '';
+window.bpmnNamingSort = { key: 'status', dir: 1 };
+window.bpmnNamingPage = 1;
+window.bpmnNamingItemsPerPage = 20;
+
+let bpmnDonutChartInstance = null;
+let bpmnBarChartInstance = null;
+
+// Initialize the BPMN module elements
+function initBpmnNamingModule() {
+  loadBpmnRules();
+  renderBpmnNamingImportRules();
+  renderBpmnConfigRules();
+  setupBpmnNamingEventListeners();
+}
+
+// Render rules on the import page to let the user check/uncheck them
+function renderBpmnNamingImportRules() {
+  const grid = document.getElementById('bpmnNamingImportRulesGrid');
+  if (!grid) return;
+  
+  grid.innerHTML = bpmnRules.map((rule, idx) => `
+    <div class="conf-item" style="padding:8px 12px; margin-bottom:0;">
+      <input type="checkbox" id="chk_import_bpmn_rule_${idx}" ${rule.enabled ? 'checked' : ''} onchange="toggleBpmnRuleEnabled(${idx}, this.checked)">
+      <label for="chk_import_bpmn_rule_${idx}" style="font-size:12px;">
+        ${esc(rule.label)}
+        <small style="font-size:10px; margin-top:0;">${esc(rule.desc)}</small>
+      </label>
+    </div>
+  `).join('');
+}
+
+// Helper to toggle rule and sync both screens
+window.toggleBpmnRuleEnabled = function(idx, isChecked) {
+  bpmnRules[idx].enabled = isChecked;
+  saveBpmnRules();
+  renderBpmnConfigRules();
+  renderBpmnNamingImportRules();
+};
+
+// Event Listeners setup
+let bpmnListenersAttached = false;
+function setupBpmnNamingEventListeners() {
+  if (bpmnListenersAttached) return;
+  
+  const dz = document.getElementById('dropZoneBpmnNaming');
+  const input = document.getElementById('fileInputBpmnNaming');
+  
+  if (input) {
+    input.addEventListener('change', e => {
+      if (e.target.files.length > 0) {
+        handleBpmnNamingFile(e.target.files[0]);
+      }
+    });
+  }
+  
+  if (dz) {
+    dz.addEventListener('dragover', e => {
+      e.preventDefault();
+      dz.classList.add('drag');
+    });
+    dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+    dz.addEventListener('drop', e => {
+      e.preventDefault();
+      dz.classList.remove('drag');
+      if (e.dataTransfer.files.length > 0) {
+        handleBpmnNamingFile(e.dataTransfer.files[0]);
+      }
+    });
+  }
+  
+  bpmnListenersAttached = true;
+}
+
+// Read the BPMN file
+function handleBpmnNamingFile(file) {
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = e => {
+    const xmlText = e.target.result;
+    bpmnNamingFileName = file.name;
+    
+    try {
+      const parser = new DOMParser();
+      bpmnNamingXmlDoc = parser.parseFromString(xmlText, "application/xml");
+      
+      const parserError = bpmnNamingXmlDoc.querySelector('parsererror');
+      if (parserError) {
+        throw new Error(parserError.textContent);
+      }
+      
+      // Perform extraction
+      bpmnNamingElements = auditBpmnXmlDoc(bpmnNamingXmlDoc);
+      
+      // Enable analyze button
+      const btn = document.getElementById('analyzeBpmnNamingBtn');
+      if (btn) btn.removeAttribute('disabled');
+      
+      document.getElementById('uploadTitleBpmnNaming').textContent = file.name;
+      document.getElementById('uploadSubBpmnNaming').textContent = `Fichier BPMN chargé (${bpmnNamingElements.length} éléments identifiés)`;
+      
+      // Update details
+      updateBpmnNamingSummary();
+      updateBpmnNamingPreview();
+      
+    } catch(err) {
+      console.error("Erreur parsing BPMN pour nommage", err);
+      alert("Erreur de parsing XML : " + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// Draw Summary Counts
+function updateBpmnNamingSummary() {
+  const container = document.getElementById('bpmnNamingSummarySection');
+  const countSpan = document.getElementById('bpmnNamingCountHint');
+  const summaryEl = document.getElementById('bpmnNamingElementSummary');
+  
+  if (!container || !summaryEl) return;
+  
+  const stats = {};
+  bpmnNamingElements.forEach(item => {
+    stats[item.typeLabel] = (stats[item.typeLabel] || 0) + 1;
+  });
+  
+  const total = bpmnNamingElements.length;
+  if (countSpan) countSpan.textContent = `${total} éléments détectés`;
+  
+  if (total === 0) {
+    container.style.display = 'none';
+    return;
+  }
+  
+  container.style.display = 'block';
+  summaryEl.innerHTML = Object.entries(stats).map(([label, count]) => `
+    <div style="background:var(--bg-main); padding:6px 12px; border-radius:var(--border-radius-sm); border:1px solid var(--border-color);">
+      <strong style="color:var(--brand-primary);">${count}</strong> ${label}
+    </div>
+  `).join('');
+}
+
+// Show preview of nodes
+function updateBpmnNamingPreview() {
+  const box = document.getElementById('bpmnNamingPreviewBox');
+  if (!box) return;
+  
+  if (bpmnNamingElements.length === 0) {
+    box.innerHTML = '<span style="color:var(--text-tertiary)">Aucun élément trouvé...</span>';
+    return;
+  }
+  
+  let html = '';
+  const count = Math.min(bpmnNamingElements.length, 10);
+  for (let i = 0; i < count; i++) {
+    const el = bpmnNamingElements[i];
+    html += `<div style="margin-bottom:6px; line-height:1.5;">
+      <span class="badge-bpmn type-${el.type}">${esc(el.typeLabel)}</span>
+      <strong style="color:var(--text-primary); font-size:11px;">${esc(el.id)}</strong>
+      <span style="color:var(--text-secondary); font-size:11px;">: "${esc(el.name || '[Sans nom]')}"</span>
+    </div>`;
+  }
+  
+  if (bpmnNamingElements.length > 10) {
+    html += `<div style="color:var(--text-tertiary); font-size:11px; margin-top:4px;">... et ${bpmnNamingElements.length - 10} autres éléments.</div>`;
+  }
+  
+  box.innerHTML = html;
+}
+
+// Trigger Analysis
+window.analyzeBpmnNaming = async function() {
+  if (bpmnNamingElements.length === 0) return;
+  
+  // Show spinner
+  const loader = document.getElementById('loaderOverlay');
+  const progressBar = document.getElementById('loaderProgressBar');
+  
+  progressBar.style.transition = 'none';
+  progressBar.style.width = '0%';
+  loader.style.display = 'flex';
+  loader.offsetHeight; // force reflow
+  loader.classList.add('active');
+  
+  setTimeout(() => {
+    progressBar.style.transition = 'width 2s linear';
+    progressBar.style.width = '100%';
+  }, 50);
+  
+  // Wait 2 seconds (simulated loader)
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  
+  // Re-audit elements based on current rules selection
+  bpmnNamingElements = auditBpmnXmlDoc(bpmnNamingXmlDoc);
+  
+  // Reset pagination/filters
+  bpmnNamingFilter = 'all';
+  bpmnNamingSearch = '';
+  bpmnNamingSort = { key: 'status', dir: 1 };
+  bpmnNamingPage = 1;
+  
+  // Display tab results link
+  const tab = document.getElementById('bpmnNamingResultsTab');
+  if (tab) tab.style.display = '';
+  
+  switchTab('bpmn-naming-results');
+  renderBpmnNamingResults();
+  
+  // Hide loader
+  loader.classList.remove('active');
+  setTimeout(() => {
+    loader.style.display = 'none';
+  }, 300);
+};
+
+// Render Audit Results
+function renderBpmnNamingResults() {
+  const total = bpmnNamingElements.length;
+  const valid = bpmnNamingElements.filter(r => r.status === 'valid').length;
+  const warn = bpmnNamingElements.filter(r => r.status === 'warn').length;
+  const invalid = bpmnNamingElements.filter(r => r.status === 'invalid').length;
+  
+  const score = Math.round((valid / total) * 100) || 0;
+  const scoreColor = score >= 90 ? 'var(--ok-dark)' : score >= 70 ? 'var(--brand-primary)' : 'var(--err-dark)';
+  
+  // KPIs
+  document.getElementById('kpi-bpmn-total').textContent = total;
+  document.getElementById('kpi-bpmn-score').textContent = `${score}%`;
+  document.getElementById('kpi-bpmn-score').style.color = scoreColor;
+  
+  const scoreStatus = document.getElementById('kpi-bpmn-score-status');
+  if (scoreStatus) {
+    let text = 'Insuffisant';
+    if (score >= 90) text = 'Excellent';
+    else if (score >= 70) text = 'Acceptable';
+    scoreStatus.textContent = text;
+    scoreStatus.style.color = scoreColor;
+  }
+  
+  document.getElementById('kpi-bpmn-errors').textContent = invalid;
+  document.getElementById('kpi-bpmn-warnings').textContent = warn;
+  
+  // Score Bar
+  document.getElementById('bpmnScoreBar').innerHTML = `
+    <span class="score-label">Score de conformité de nommage</span>
+    <div class="score-track"><div class="score-fill" style="width:${score}%;background:${scoreColor}"></div></div>
+    <span class="score-val" style="color:${scoreColor}">${score}%</span>
+  `;
+  
+  // Toolbar
+  document.getElementById('bpmnToolbarEl').innerHTML = `
+    <button class="pill active" id="pbAll" onclick="setBpmnFilter('all')">Tous (${total})</button>
+    <button class="pill p-ok" id="pbOk" onclick="setBpmnFilter('valid')">Conformes (${valid})</button>
+    <button class="pill p-err" id="pbErr" onclick="setBpmnFilter('invalid')">Non conformes (${invalid})</button>
+    <button class="pill p-warn" id="pbWarn" onclick="setBpmnFilter('warn')">Avertissements (${warn})</button>
+    <input class="srch" placeholder="Rechercher..." id="bpmnSearchInput" oninput="onBpmnSearch()" value="${esc(bpmnNamingSearch)}">
+    <select class="srt" id="bpmnSortSel" onchange="onBpmnSortChange()" style="height:36px;">
+      <option value="status">Trier : statut</option>
+      <option value="type">Trier : type d'élément</option>
+      <option value="name">Trier : nom</option>
+    </select>
+  `;
+  
+  updateBpmnPills();
+  renderBpmnCharts(valid, warn, invalid);
+  renderBpmnNamingTable();
+}
+
+function updateBpmnPills() {
+  ['All', 'Ok', 'Err', 'Warn'].forEach(x => {
+    const el = document.getElementById('pb' + x);
+    if (el) el.classList.toggle('active',
+      (x === 'All' && bpmnNamingFilter === 'all') || 
+      (x === 'Ok' && bpmnNamingFilter === 'valid') || 
+      (x === 'Err' && bpmnNamingFilter === 'invalid') || 
+      (x === 'Warn' && bpmnNamingFilter === 'warn')
+    );
+  });
+}
+
+// Donut & Bar Charts for Naming Results
+function renderBpmnCharts(valid, warn, invalid) {
+  if (!window.Chart) return;
+  
+  // Donut Chart
+  const ctxDonut = document.getElementById('bpmnDonutChart').getContext('2d');
+  if (bpmnDonutChartInstance) bpmnDonutChartInstance.destroy();
+  
+  bpmnDonutChartInstance = new Chart(ctxDonut, {
+    type: 'doughnut',
+    data: {
+      labels: ['Conformes', 'Avertissements', 'Non conformes'],
+      datasets: [{
+        data: [valid, warn, invalid],
+        backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+        borderWidth: 0,
+        hoverOffset: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '70%',
+      plugins: {
+        legend: { position: 'right', labels: { usePointStyle: true, boxWidth: 8, padding: 12 } }
+      }
+    }
+  });
+  
+  // Bar Chart of Violations by Element Type
+  const elViolations = {};
+  bpmnNamingElements.forEach(el => {
+    if (el.status !== 'valid') {
+      elViolations[el.typeLabel] = (elViolations[el.typeLabel] || 0) + el.issues.length;
+    }
+  });
+  
+  const labels = Object.keys(elViolations);
+  const data = Object.values(elViolations);
+  
+  const ctxBar = document.getElementById('bpmnBarChart').getContext('2d');
+  if (bpmnBarChartInstance) bpmnBarChartInstance.destroy();
+  
+  bpmnBarChartInstance = new Chart(ctxBar, {
+    type: 'bar',
+    data: {
+      labels: labels.length ? labels : ['Aucune'],
+      datasets: [{
+        label: 'Violations de règles',
+        data: data.length ? data : [0],
+        backgroundColor: 'rgba(139, 92, 246, 0.75)',
+        borderRadius: 4,
+        barThickness: 15
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false } },
+        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+      }
+    }
+  });
+}
+
+// Results Table
+function renderBpmnNamingTable() {
+  const search = bpmnNamingSearch.toLowerCase();
+  const statusOrder = { invalid: 0, warn: 1, valid: 2 };
+  
+  let rows = bpmnNamingElements.filter(r => {
+    if (bpmnNamingFilter !== 'all' && r.status !== bpmnNamingFilter) return false;
+    if (search && !r.name.toLowerCase().includes(search) && !r.id.toLowerCase().includes(search)) return false;
+    return true;
+  });
+  
+  // Sorting
+  rows.sort((a, b) => {
+    let av, bv;
+    if (bpmnNamingSort.key === 'status') {
+      av = statusOrder[a.status];
+      bv = statusOrder[b.status];
+    } else if (bpmnNamingSort.key === 'type') {
+      av = a.typeLabel;
+      bv = b.typeLabel;
+    } else {
+      av = a.name.toLowerCase();
+      bv = b.name.toLowerCase();
+    }
+    return av < bv ? -bpmnNamingSort.dir : av > bv ? bpmnNamingSort.dir : 0;
+  });
+  
+  filteredBpmnNamingElements = rows;
+  const totalItems = filteredBpmnNamingElements.length;
+  const totalPages = Math.ceil(totalItems / bpmnNamingItemsPerPage) || 1;
+  
+  if (bpmnNamingPage > totalPages) bpmnNamingPage = totalPages;
+  if (bpmnNamingPage < 1) bpmnNamingPage = 1;
+  
+  const paginatedRows = filteredBpmnNamingElements.slice((bpmnNamingPage - 1) * bpmnNamingItemsPerPage, bpmnNamingPage * bpmnNamingItemsPerPage);
+  
+  const tbody = document.getElementById('bpmnTableBody');
+  const empty = document.getElementById('bpmnEmptyMsg');
+  document.getElementById('bpmnRowCount').textContent = `${totalItems} élément${totalItems !== 1 ? 's' : ''} trouvé${totalItems !== 1 ? 's' : ''} (Page ${bpmnNamingPage}/${totalPages})`;
+  
+  if (!totalItems) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    document.getElementById('bpmnPaginationControls').innerHTML = '';
+    return;
+  }
+  
+  empty.style.display = 'none';
+  const stLabel = { valid: 'Conforme', invalid: 'Erreur', warn: 'Avertissement' };
+  
+  tbody.innerHTML = paginatedRows.map(r => {
+    const globalIdx = bpmnNamingElements.indexOf(r);
+    
+    const issuesHTML = r.issues.length 
+      ? `<div class="iss-list">${r.issues.map(iss => `<div class="iss-item"><span class="iss-dot ${iss.sev === 'warn' ? 'w' : ''}">●</span><strong>${esc(iss.ruleLabel)}</strong>: ${esc(iss.msg)}</div>`).join('')}</div>`
+      : '<span style="color:var(--text-tertiary);font-size:11px">—</span>';
+      
+    const suggestionHTML = r.status !== 'valid'
+      ? `<input type="text" value="${esc(r.editedSuggestion)}" onchange="updateBpmnSuggestion(${globalIdx}, this.value)" style="border:0.5px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:11px;font-family:var(--font-mono);width:100%;background:var(--bg-main);color:var(--ok-dark)">`
+      : '<span style="color:var(--text-tertiary);font-size:11px">—</span>';
+      
+    return `
+      <tr>
+        <td><span class="badge-bpmn type-${r.type}">${esc(r.typeLabel)}</span></td>
+        <td><span class="mono" style="font-weight:600; font-size:11px;">${esc(r.id)}</span></td>
+        <td><span style="font-size:12px;">${esc(r.name || '[Sans nom]')}</span></td>
+        <td><span class="badge ${r.status === 'valid' ? 'ok' : r.status === 'warn' ? 'warn' : 'err'}">${stLabel[r.status]}</span></td>
+        <td>${issuesHTML}</td>
+        <td>${suggestionHTML}</td>
+      </tr>
+    `;
+  }).join('');
+  
+  renderBpmnNamingPagination(totalPages);
+}
+
+function renderBpmnNamingPagination(totalPages) {
+  const container = document.getElementById('bpmnPaginationControls');
+  if (totalPages <= 1) { container.innerHTML = ''; return; }
+  container.innerHTML = `
+    <select class="srt" onchange="changeBpmnItemsPerPage(this.value)" style="margin-right:4px; height:34px;">
+      <option value="10" ${bpmnNamingItemsPerPage === 10 ? 'selected' : ''}>10 / page</option>
+      <option value="20" ${bpmnNamingItemsPerPage === 20 ? 'selected' : ''}>20 / page</option>
+      <option value="50" ${bpmnNamingItemsPerPage === 50 ? 'selected' : ''}>50 / page</option>
+      <option value="100" ${bpmnNamingItemsPerPage === 100 ? 'selected' : ''}>100 / page</option>
+    </select>
+    <button class="btn-ghost" style="padding:4px 8px" onclick="changeBpmnPage(bpmnNamingPage - 1)" ${bpmnNamingPage === 1 ? 'disabled' : ''}>Préc.</button>
+    <span style="font-size:12px; font-weight:500; color:var(--text-secondary);"> ${bpmnNamingPage} / ${totalPages} </span>
+    <button class="btn-ghost" style="padding:4px 8px" onclick="changeBpmnPage(bpmnNamingPage + 1)" ${bpmnNamingPage === totalPages ? 'disabled' : ''}>Suiv.</button>
+  `;
+}
+
+window.changeBpmnPage = function(p) { bpmnNamingPage = p; renderBpmnNamingTable(); };
+window.changeBpmnItemsPerPage = function(val) { bpmnNamingItemsPerPage = parseInt(val, 10); bpmnNamingPage = 1; renderBpmnNamingTable(); };
+
+window.onBpmnSearch = function() {
+  const input = document.getElementById('bpmnSearchInput');
+  bpmnNamingSearch = input ? input.value : '';
+  bpmnNamingPage = 1;
+  renderBpmnNamingTable();
+};
+
+window.onBpmnSortChange = function() {
+  const sel = document.getElementById('bpmnSortSel');
+  if (sel) {
+    bpmnNamingSort.key = sel.value;
+    bpmnNamingPage = 1;
+    renderBpmnNamingTable();
+  }
+};
+
+window.sortBpmnResults = function(k) {
+  if (bpmnNamingSort.key === k) bpmnNamingSort.dir *= -1;
+  else {
+    bpmnNamingSort.key = k;
+    bpmnNamingSort.dir = 1;
+  }
+  bpmnNamingPage = 1;
+  
+  // Set dropdown value
+  const sel = document.getElementById('bpmnSortSel');
+  if (sel) sel.value = k;
+  
+  renderBpmnNamingTable();
+};
+
+window.setBpmnFilter = function(f) {
+  bpmnNamingFilter = f;
+  bpmnNamingPage = 1;
+  updateBpmnPills();
+  renderBpmnNamingTable();
+};
+
+window.updateBpmnSuggestion = function(idx, val) {
+  bpmnNamingElements[idx].editedSuggestion = val;
+};
+
+// ==========================================
+//   BPMN CONFIGURATION CRUD LOGIC
+// ==========================================
+
+function renderBpmnConfigRules() {
+  const tbody = document.getElementById('bpmnRulesTableBody');
+  if (!tbody) return;
+  
+  const targetLabels = {
+    'process-id': 'Process ID',
+    'process-name': 'Nom de processus',
+    'task': 'Tâche / Activité',
+    'subprocess': 'Sous-processus',
+    'gateway-divergent': 'Gateway Divergente',
+    'gateway-parallel': 'Gateway Parallel (AND)',
+    'sequence-flow': 'Transition (Flow)',
+    'event-start': 'Event Début',
+    'event-catch': 'Event Attente',
+    'event-end': 'Event Fin',
+    'event-boundary': 'Event Bordure',
+    'message': 'Message',
+    'signal': 'Signal',
+    'variable': 'Variable',
+    'variable-collection': 'Variable Collection'
+  };
+  
+  tbody.innerHTML = bpmnRules.map((rule, idx) => `
+    <tr>
+      <td style="text-align:center;">
+        <input type="checkbox" id="rule_bpmn_active_${idx}" ${rule.enabled ? 'checked' : ''} onchange="toggleBpmnRuleEnabled(${idx}, this.checked)">
+      </td>
+      <td><strong>${esc(rule.label)}</strong></td>
+      <td><span class="badge-bpmn type-${rule.target}">${esc(targetLabels[rule.target] || rule.target)}</span></td>
+      <td><span style="font-size:12px;color:var(--text-secondary);">${esc(rule.desc)}</span></td>
+      <td><span class="badge ${rule.severity === 'err' ? 'err' : 'warn'}">${rule.severity === 'err' ? 'Erreur (Critique)' : 'Avertissement'}</span></td>
+      <td><code style="font-size:11px;font-family:var(--font-mono);">${rule.type === 'regex' ? esc(rule.pattern) : 'Fonction custom'}</code></td>
+      <td style="text-align:center;">
+        <div style="display:flex; gap:6px; justify-content:center;">
+          <button class="edit-rule-btn" onclick="openEditBpmnRuleModal(${idx})">Modifier</button>
+          <button class="delete-rule-btn" onclick="deleteBpmnRule(${idx})">Suppr.</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+window.resetBpmnRules = function() {
+  if (confirm("Êtes-vous sûr de vouloir réinitialiser les règles de nommage BPMN par défaut ?")) {
+    resetBpmnRulesToDefault();
+    renderBpmnConfigRules();
+    renderBpmnNamingImportRules();
+    alert("Les règles de nommage ont été réinitialisées !");
+  }
+};
+
+window.deleteBpmnRule = function(idx) {
+  if (confirm(`Êtes-vous sûr de vouloir supprimer la règle "${bpmnRules[idx].label}" ?`)) {
+    bpmnRules.splice(idx, 1);
+    saveBpmnRules();
+    renderBpmnConfigRules();
+    renderBpmnNamingImportRules();
+  }
+};
+
+window.openAddBpmnRuleModal = function() {
+  document.getElementById('bpmnModalTitle').textContent = "Ajouter une règle de nommage";
+  document.getElementById('bpmnModalRuleId').value = "";
+  document.getElementById('bpmnRuleForm').reset();
+  toggleBpmnRuleTypeField('regex');
+  document.getElementById('bpmnRuleModal').style.display = 'flex';
+};
+
+window.openEditBpmnRuleModal = function(idx) {
+  const rule = bpmnRules[idx];
+  document.getElementById('bpmnModalTitle').textContent = "Modifier la règle de nommage";
+  document.getElementById('bpmnModalRuleId').value = idx;
+  document.getElementById('bpmnRuleLabel').value = rule.label;
+  document.getElementById('bpmnRuleDesc').value = rule.desc;
+  document.getElementById('bpmnRuleTarget').value = rule.target;
+  document.getElementById('bpmnRuleSeverity').value = rule.severity;
+  document.getElementById('bpmnRuleType').value = rule.type;
+  document.getElementById('bpmnRulePattern').value = rule.pattern || "";
+  document.getElementById('bpmnRuleError').value = rule.errorMessage;
+  
+  toggleBpmnRuleTypeField(rule.type);
+  document.getElementById('bpmnRuleModal').style.display = 'flex';
+};
+
+window.closeBpmnRuleModal = function() {
+  document.getElementById('bpmnRuleModal').style.display = 'none';
+};
+
+window.toggleBpmnRuleTypeField = function(val) {
+  const group = document.getElementById('bpmnRulePatternGroup');
+  const input = document.getElementById('bpmnRulePattern');
+  if (group && input) {
+    if (val === 'regex') {
+      group.style.display = 'block';
+      input.setAttribute('required', 'required');
+    } else {
+      group.style.display = 'none';
+      input.removeAttribute('required');
+    }
+  }
+};
+
+window.saveBpmnRuleForm = function(e) {
+  if (e) e.preventDefault();
+  
+  const idVal = document.getElementById('bpmnModalRuleId').value;
+  const label = document.getElementById('bpmnRuleLabel').value.trim();
+  const desc = document.getElementById('bpmnRuleDesc').value.trim();
+  const target = document.getElementById('bpmnRuleTarget').value;
+  const severity = document.getElementById('bpmnRuleSeverity').value;
+  const type = document.getElementById('bpmnRuleType').value;
+  const pattern = document.getElementById('bpmnRulePattern').value.trim();
+  const errorMessage = document.getElementById('bpmnRuleError').value.trim();
+  
+  const newRule = {
+    id: idVal !== "" ? bpmnRules[parseInt(idVal)].id : 'rule_' + Date.now(),
+    label,
+    desc,
+    target,
+    severity,
+    type,
+    pattern: type === 'regex' ? pattern : null,
+    errorMessage,
+    enabled: idVal !== "" ? bpmnRules[parseInt(idVal)].enabled : true
+  };
+  
+  if (idVal !== "") {
+    bpmnRules[parseInt(idVal)] = newRule;
+  } else {
+    bpmnRules.push(newRule);
+  }
+  
+  saveBpmnRules();
+  renderBpmnConfigRules();
+  renderBpmnNamingImportRules();
+  closeBpmnRuleModal();
+};
+
+// ==========================================
+//   BPMN NAMING EXPORTS & XML WRITER
+// ==========================================
+
+window.exportBpmnCSV = function() {
+  if (!bpmnNamingElements.length) { alert("Le rapport est vide."); return; }
+  const header = 'Type,ID technique,Libellé actuel,Statut,Problèmes,Suggestion\n';
+  const body = bpmnNamingElements.map(r => [
+    qq(r.typeLabel),
+    qq(r.id),
+    qq(r.name || ''),
+    qq(r.status === 'valid' ? 'Conforme' : r.status === 'warn' ? 'Avertissement' : 'Non conforme'),
+    qq(r.issues.map(i => i.msg).join('; ')),
+    qq(r.editedSuggestion || '')
+  ].join(',')).join('\n');
+  dl(header + body, 'bpmn_naming_audit_rapport.csv', 'text/csv');
+};
+
+window.exportBpmnExcel = function() {
+  if (!window.XLSX) { alert('Bibliothèque XLSX non chargée'); return; }
+  if (!bpmnNamingElements.length) { alert("Le rapport est vide."); return; }
+  
+  const data = [['Type d\'élément', 'ID technique', 'Libellé actuel', 'Statut', 'Problèmes', 'Suggestion corrective']];
+  bpmnNamingElements.forEach(r => data.push([
+    r.typeLabel,
+    r.id,
+    r.name || '',
+    r.status === 'valid' ? 'Conforme' : r.status === 'warn' ? 'Avertissement' : 'Non conforme',
+    r.issues.map(i => i.msg).join('; '),
+    r.editedSuggestion || ''
+  ]));
+  
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = [{ wch: 18 }, { wch: 22 }, { wch: 25 }, { wch: 15 }, { wch: 45 }, { wch: 25 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'Audit Nommage');
+  XLSX.writeFile(wb, 'bpmn_naming_audit_rapport.xlsx');
+};
+
+window.downloadCorrectedBpmnFile = function() {
+  if (!bpmnNamingXmlDoc) {
+    alert("Aucun fichier BPMN n'est actuellement chargé.");
+    return;
+  }
+  
+  // Clone doc
+  const clonedDoc = bpmnNamingXmlDoc.cloneNode(true);
+  
+  // Apply naming corrections inside XML nodes
+  const updatedXmlText = generateCorrectedBpmnXml(clonedDoc, bpmnNamingElements);
+  
+  const correctedFileName = bpmnNamingFileName
+    .replace(/\.bpmn$/, '_naming_corrected.bpmn')
+    .replace(/\.xml$/, '_naming_corrected.xml');
+    
+  dl(updatedXmlText, correctedFileName, 'application/xml');
+};
+
 
 
 
