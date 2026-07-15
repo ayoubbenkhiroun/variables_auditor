@@ -2620,3 +2620,437 @@ body.theme-cyber {
     min-height: auto !important;
   }
 }
+
+/* ---------- Guide d'utilisation Page ---------- */
+.guide-container {
+  padding: 0 0 2rem;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.guide-section {
+  margin-bottom: 2rem;
+}
+
+.guide-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  letter-spacing: -0.3px;
+}
+
+.guide-meta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 16px;
+}
+
+.guide-section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--brand-primary);
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.guide-subtitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 16px 0 8px;
+}
+
+.guide-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  padding: 20px 24px;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.guide-card h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 14px 0 6px;
+}
+
+.guide-card h4:first-child {
+  margin-top: 0;
+}
+
+.guide-card p {
+  margin-bottom: 8px;
+}
+
+.guide-card p:last-child {
+  margin-bottom: 0;
+}
+
+.guide-card ul {
+  list-style: disc;
+  padding-left: 20px;
+  margin: 8px 0;
+}
+
+.guide-card ul li {
+  margin-bottom: 4px;
+}
+
+.guide-note {
+  background: rgba(255, 117, 32, 0.04);
+  border-left: 3px solid var(--brand-primary);
+  padding: 14px 18px;
+  font-size: 13px;
+}
+
+.guide-card code {
+  font-family: var(--font-mono);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--brand-primary);
+  border: 0.5px solid var(--border-color);
+}
+
+.guide-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  overflow: hidden;
+}
+
+.guide-table th,
+.guide-table td {
+  border: 1px solid var(--border-color);
+  padding: 8px 14px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.guide-table th {
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.guide-table tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.faq-item {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.faq-item:last-child {
+  border-bottom: none;
+}
+
+.faq-q {
+  color: var(--text-primary);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.faq-a {
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding-left: 4px;
+}
+
+#group-guide .menu-header {
+  margin-top: 8px;
+}
+
+#group-guide .menu-header.active {
+  background: rgba(255, 117, 32, 0.08);
+  color: var(--active-tab-text);
+  border-color: rgba(255, 117, 32, 0.25);
+  box-shadow: inset 3px 0 0 var(--brand-primary);
+}
+
+#group-guide .menu-header svg:first-of-type {
+  color: var(--text-tertiary);
+}
+
+#group-guide .menu-header:hover svg:first-of-type {
+  color: var(--text-primary);
+}
+
+#group-guide .menu-header.active svg:first-of-type {
+  color: var(--active-tab-text);
+}
+
+/* ---------- PMG Custom Import & Stepper Wizard styles ---------- */
+.pmg-import-modes {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 12px;
+}
+
+.pmg-import-modes .btn-ghost.active {
+  background: var(--brand-primary);
+  color: white;
+  border-color: var(--brand-primary);
+}
+
+.pmg-stepper {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  position: relative;
+  width: 100%;
+}
+
+.step-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  text-align: center;
+}
+
+.step-num {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 13px;
+  transition: all 0.3s ease;
+  border: 2px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+
+.step-node.active .step-num {
+  background: var(--brand-primary);
+  color: white;
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 10px rgba(255, 90, 0, 0.3);
+}
+
+.step-node.completed .step-num {
+  background: var(--ok);
+  color: white;
+  border-color: var(--ok);
+}
+
+.step-text {
+  font-size: 11px;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  transition: color 0.3s;
+}
+
+.step-node.active .step-text {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.step-node.completed .step-text {
+  color: var(--text-secondary);
+}
+
+.step-panel {
+  display: none;
+}
+
+.step-panel.active {
+  display: block;
+  animation: fadeInPmgStep 0.3s ease;
+}
+
+@keyframes fadeInPmgStep {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.radio-label, .checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.radio-label input, .checkbox-label input {
+  accent-color: var(--brand-primary);
+}
+
+.pmg-level-indent {
+  display: inline-block;
+}
+
+.pmg-custom-dropzone {
+  border: 2px dashed var(--border-color);
+  padding: 30px 20px;
+  border-radius: var(--border-radius-md);
+  text-align: center;
+  background: rgba(255,255,255,0.01);
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 15px;
+  position: relative;
+}
+
+.pmg-custom-dropzone input[type="file"] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.pmg-custom-dropzone:hover, .pmg-custom-dropzone.drag {
+  border-color: var(--brand-primary);
+  background: rgba(255, 90, 0, 0.03);
+}
+
+.pmg-custom-dropzone svg {
+  width: 36px;
+  height: 36px;
+  stroke: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+
+.pmg-custom-dropzone:hover svg {
+  stroke: var(--brand-primary);
+}
+
+/* ---------- ROI Calculator Styles ---------- */
+.roi-dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 1024px) {
+  .roi-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.roi-card-section {
+  background: var(--bg-card);
+  padding: 20px;
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+.roi-task-item {
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.roi-task-item:hover {
+  border-color: var(--border-color-hover) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+/* Custom styling for sliders */
+.roi-task-item input[type="range"] {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+  transition: background 0.3s;
+}
+
+/* Print layout optimizations for the ROI Report */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  
+  .sidebar, .main-header, .toolbar, .btn-row, button, input[type="file"], select, #roiImportFile {
+    display: none !important;
+  }
+  
+  .main-content {
+    margin-left: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+  
+  .panel {
+    display: none !important;
+  }
+  
+  .panel#panel-roi-calculator {
+    display: block !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  
+  .roi-dashboard-grid {
+    grid-template-columns: 1fr !important;
+    gap: 15px !important;
+  }
+  
+  .roi-card-section {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+  }
+  
+  .kpi-card {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+  }
+  
+  .kpi-value {
+    color: #ff7520 !important;
+  }
+  
+  .chart-card {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+  }
+  
+  .tbl-wrap table {
+    color: #000000 !important;
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+  
+  .tbl-wrap th {
+    background: #f1f5f9 !important;
+    color: #000000 !important;
+    border: 1px solid #cbd5e1 !important;
+  }
+  
+  .tbl-wrap td {
+    border: 1px solid #cbd5e1 !important;
+    color: #000000 !important;
+  }
+}

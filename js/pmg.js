@@ -6,6 +6,825 @@ window.pmgFileName = "";
 window.pmgActivities = [];
 window.pmgProcessDetails = {};
 
+// Custom CSV/Excel PMG Import state
+window.pmgImportMode = 'bpmn'; // 'bpmn' or 'excel'
+window.pmgImportMethod = 'steps'; // 'steps' or 'bulk'
+window.pmgUseSingleFile = true;
+window.pmgActiveStep = 1;
+
+window.pmgUploadedFiles = {
+  step1: { raw: [], headers: [], name: '' },
+  step2: { raw: [], headers: [], name: '' },
+  step3: { raw: [], headers: [], name: '' },
+  bulk: { raw: [], headers: [], name: '' }
+};
+
+window.pmgTempSubprocesses = [];
+
+// Event handlers for mode changes
+window.setPmgImportMode = function(mode) {
+  window.pmgImportMode = mode;
+  document.getElementById('pmg-mode-bpmn-btn').classList.toggle('active', mode === 'bpmn');
+  document.getElementById('pmg-mode-excel-btn').classList.toggle('active', mode === 'excel');
+  
+  document.getElementById('pmg-bpmn-import-container').style.display = mode === 'bpmn' ? 'block' : 'none';
+  document.getElementById('pmg-custom-import-container').style.display = mode === 'excel' ? 'block' : 'none';
+};
+
+window.onChangePmgImportMethod = function() {
+  const method = document.querySelector('input[name="pmgImportMethod"]:checked').value;
+  window.pmgImportMethod = method;
+  
+  document.getElementById('pmg-wizard-container').style.display = method === 'steps' ? 'block' : 'none';
+  document.getElementById('pmg-bulk-container').style.display = method === 'bulk' ? 'block' : 'none';
+  
+  if (method === 'steps') {
+    window.onChangePmgUseSingleFile();
+  }
+};
+
+window.onChangePmgUseSingleFile = function() {
+  const single = document.getElementById('pmgUseSingleFile').checked;
+  window.pmgUseSingleFile = single;
+  
+  document.getElementById('dropZonePmgStep2').style.display = single ? 'none' : 'block';
+  document.getElementById('dropZonePmgStep3').style.display = single ? 'none' : 'block';
+  
+  const uploadSub = document.getElementById('uploadSubPmgStep1');
+  if (uploadSub) {
+    uploadSub.textContent = single 
+      ? 'Fichier unique pour toutes les étapes (.xlsx, .xls, .csv)'
+      : 'Fichier pour l\'étape 1 : sous-processus (.xlsx, .xls, .csv)';
+  }
+};
+
+window.onChangePmgVarMappingStyle = function() {
+  const style = document.getElementById('pmgVarMappingStyle').value;
+  document.getElementById('mappingGridPmgStep2Separate').style.display = style === 'separate' ? 'grid' : 'none';
+  document.getElementById('mappingGridPmgStep2RowByRow').style.display = style === 'rowByRow' ? 'grid' : 'none';
+  window.updatePmgStepPreview(2);
+};
+
+window.onChangePmgBulkVarMappingStyle = function() {
+  const style = document.getElementById('pmgBulkVarMappingStyle').value;
+  document.getElementById('pmgBulkMappingGridSeparate').style.display = style === 'separate' ? 'grid' : 'none';
+  document.getElementById('pmgBulkMappingGridRowByRow').style.display = style === 'rowByRow' ? 'grid' : 'none';
+  window.updatePmgBulkPreview();
+};
+
+window.pmgStepGoBack = function(targetStep) {
+  for (let s = 1; s <= 3; s++) {
+    const node = document.getElementById('step-node-' + s);
+    const panel = document.getElementById('pmg-step-panel-' + s);
+    if (s === targetStep) {
+      node.className = 'step-node active';
+      panel.style.display = 'block';
+    } else {
+      panel.style.display = 'none';
+      if (s < targetStep) {
+        node.className = 'step-node completed';
+      } else {
+        node.className = 'step-node disabled';
+      }
+    }
+  }
+  window.pmgActiveStep = targetStep;
+  document.getElementById('pmgStepperProgress').style.width = ((targetStep - 1) / 2 * 68) + '%';
+};
+
+// File handlers
+window.handlePmgStepFile = function(step, file) {
+  if (!file) return;
+  if (!window.XLSX) {
+    alert("La bibliothèque Excel (XLSX) n'est pas chargée.");
+    return;
+  }
+  
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      
+      let raw = [];
+      let headers = [];
+      
+      if (sheetData.length > 0) {
+        headers = sheetData[0].map((h, i) => h ? String(h).trim() : `Colonne ${i}`);
+        raw = sheetData.slice(1);
+      }
+      
+      window.pmgUploadedFiles['step' + step] = {
+        raw: raw,
+        headers: headers,
+        name: file.name
+      };
+      
+      document.getElementById(`uploadTitlePmgStep${step}`).textContent = file.name;
+      document.getElementById(`uploadSubPmgStep${step}`).textContent = `${raw.length} lignes chargées.`;
+      document.getElementById(`mappingSectionPmgStep${step}`).style.display = 'block';
+      
+      window.populatePmgStepMappingDropdowns(step);
+      
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors du décodage du fichier : " + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+};
+
+window.handlePmgBulkFile = function(file) {
+  if (!file) return;
+  if (!window.XLSX) {
+    alert("La bibliothèque Excel (XLSX) n'est pas chargée.");
+    return;
+  }
+  
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      
+      let raw = [];
+      let headers = [];
+      
+      if (sheetData.length > 0) {
+        headers = sheetData[0].map((h, i) => h ? String(h).trim() : `Colonne ${i}`);
+        raw = sheetData.slice(1);
+      }
+      
+      window.pmgUploadedFiles['bulk'] = {
+        raw: raw,
+        headers: headers,
+        name: file.name
+      };
+      
+      document.getElementById('uploadTitlePmgBulk').textContent = file.name;
+      document.getElementById('uploadSubPmgBulk').textContent = `${raw.length} lignes chargées.`;
+      
+      document.getElementById('pmgBulkVarStyleWrapper').style.display = 'block';
+      document.getElementById('mappingSectionPmgBulk').style.display = 'block';
+      
+      window.populatePmgBulkMappingDropdowns();
+      
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors du décodage du fichier : " + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+};
+
+// Mappings dropdown managers
+window.populatePmgStepMappingDropdowns = function(step) {
+  const fileData = window.pmgUploadedFiles['step' + step];
+  if (!fileData) return;
+  
+  const headers = fileData.headers;
+  
+  if (step === 1) {
+    const selects = [
+      document.getElementById('colPmgSubId'),
+      document.getElementById('colPmgSubName'),
+      document.getElementById('colPmgSubParent'),
+      document.getElementById('colPmgSubLevel')
+    ];
+    
+    selects.forEach(sel => {
+      const hasDef = sel.querySelector('option[value="-1"]');
+      sel.innerHTML = hasDef ? '<option value="-1">-- Non défini --</option>' : '';
+      headers.forEach((h, idx) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = `${h} (Col ${idx})`;
+        sel.appendChild(opt);
+      });
+    });
+    
+    const headersLower = headers.map(h => h.toLowerCase());
+    
+    const idIdx = headersLower.findIndex(h => h === 'id' || h.includes('id_sous') || h.includes('id sous') || h.includes('subprocess_id') || h.includes('subprocessid') || h.includes('code'));
+    if (idIdx >= 0) document.getElementById('colPmgSubId').value = idIdx;
+    else if (headers.length > 0) document.getElementById('colPmgSubId').value = 0;
+    
+    const nameIdx = headersLower.findIndex(h => h.includes('nom') || h.includes('name') || h.includes('libelle') || h.includes('libellé') || h.includes('processus') || h.includes('label'));
+    if (nameIdx >= 0) document.getElementById('colPmgSubName').value = nameIdx;
+    else if (headers.length > 1) document.getElementById('colPmgSubName').value = 1;
+    
+    const parentIdx = headersLower.findIndex(h => h.includes('parent') || h.includes('parent_id') || h.includes('parentid') || h.includes('parent_process'));
+    if (parentIdx >= 0) document.getElementById('colPmgSubParent').value = parentIdx;
+    
+    const levelIdx = headersLower.findIndex(h => h.includes('level') || h.includes('niveau') || h.includes('hiérarchie') || h.includes('hierarchie'));
+    if (levelIdx >= 0) document.getElementById('colPmgSubLevel').value = levelIdx;
+    
+    document.getElementById('btnPmgStep1Next').disabled = false;
+    window.updatePmgStepPreview(1);
+    
+  } else if (step === 2) {
+    const selects = [
+      document.getElementById('colPmgVarSubIdSep'),
+      document.getElementById('colPmgVarInputs'),
+      document.getElementById('colPmgVarOutputs'),
+      document.getElementById('colPmgVarSubIdRow'),
+      document.getElementById('colPmgVarName'),
+      document.getElementById('colPmgVarType')
+    ];
+    
+    selects.forEach(sel => {
+      const hasDef = sel.querySelector('option[value="-1"]');
+      sel.innerHTML = hasDef ? '<option value="-1">-- Non défini / Aucune --</option>' : '';
+      headers.forEach((h, idx) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = `${h} (Col ${idx})`;
+        sel.appendChild(opt);
+      });
+    });
+    
+    const headersLower = headers.map(h => h.toLowerCase());
+    
+    const idSepIdx = headersLower.findIndex(h => h === 'id' || h.includes('id_sous') || h.includes('id sous') || h.includes('subprocess_id') || h.includes('subprocessid') || h.includes('code'));
+    if (idSepIdx >= 0) {
+      document.getElementById('colPmgVarSubIdSep').value = idSepIdx;
+      document.getElementById('colPmgVarSubIdRow').value = idSepIdx;
+    }
+    
+    const inputsIdx = headersLower.findIndex(h => h.includes('input') || h.includes('entrée') || h.includes('entree') || h.includes('var_in'));
+    if (inputsIdx >= 0) document.getElementById('colPmgVarInputs').value = inputsIdx;
+    
+    const outputsIdx = headersLower.findIndex(h => h.includes('output') || h.includes('sortie') || h.includes('sorties') || h.includes('var_out'));
+    if (outputsIdx >= 0) document.getElementById('colPmgVarOutputs').value = outputsIdx;
+    
+    const varNameIdx = headersLower.findIndex(h => h.includes('variable') || h.includes('var') || h.includes('nom_var') || h.includes('nom variable'));
+    if (varNameIdx >= 0) document.getElementById('colPmgVarName').value = varNameIdx;
+    
+    const typeIdx = headersLower.findIndex(h => h.includes('type') || h.includes('flux') || h.includes('direction'));
+    if (typeIdx >= 0) document.getElementById('colPmgVarType').value = typeIdx;
+    
+    document.getElementById('btnPmgStep2Next').disabled = false;
+    window.updatePmgStepPreview(2);
+    
+  } else if (step === 3) {
+    const selects = [
+      document.getElementById('colPmgStakeholderSubId'),
+      document.getElementById('colPmgStakeholderName')
+    ];
+    
+    selects.forEach(sel => {
+      sel.innerHTML = '';
+      headers.forEach((h, idx) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = `${h} (Col ${idx})`;
+        sel.appendChild(opt);
+      });
+    });
+    
+    const headersLower = headers.map(h => h.toLowerCase());
+    
+    const idIdx = headersLower.findIndex(h => h === 'id' || h.includes('id_sous') || h.includes('id sous') || h.includes('subprocess_id') || h.includes('subprocessid') || h.includes('code'));
+    if (idIdx >= 0) document.getElementById('colPmgStakeholderSubId').value = idIdx;
+    
+    const actorIdx = headersLower.findIndex(h => h.includes('partie') || h.includes('acteur') || h.includes('role') || h.includes('rôle') || h.includes('entite') || h.includes('entité') || h.includes('stakeholder') || h.includes('entity'));
+    if (actorIdx >= 0) document.getElementById('colPmgStakeholderName').value = actorIdx;
+    
+    document.getElementById('btnPmgStep3Finish').disabled = false;
+    window.updatePmgStepPreview(3);
+  }
+};
+
+window.populatePmgBulkMappingDropdowns = function() {
+  const fileData = window.pmgUploadedFiles['bulk'];
+  if (!fileData) return;
+  
+  const headers = fileData.headers;
+  const selects = [
+    document.getElementById('colPmgBulkSubId'),
+    document.getElementById('colPmgBulkSubName'),
+    document.getElementById('colPmgBulkSubParent'),
+    document.getElementById('colPmgBulkSubLevel'),
+    document.getElementById('colPmgBulkStakeholder'),
+    document.getElementById('colPmgBulkVarInputs'),
+    document.getElementById('colPmgBulkVarOutputs'),
+    document.getElementById('colPmgBulkVarName'),
+    document.getElementById('colPmgBulkVarType')
+  ];
+  
+  selects.forEach(sel => {
+    const hasDef = sel.querySelector('option[value="-1"]');
+    sel.innerHTML = hasDef ? '<option value="-1">-- Non défini --</option>' : '';
+    headers.forEach((h, idx) => {
+      const opt = document.createElement('option');
+      opt.value = idx;
+      opt.textContent = `${h} (Col ${idx})`;
+      sel.appendChild(opt);
+    });
+  });
+  
+  const headersLower = headers.map(h => h.toLowerCase());
+  
+  const idIdx = headersLower.findIndex(h => h === 'id' || h.includes('id_sous') || h.includes('id sous') || h.includes('subprocess_id') || h.includes('subprocessid') || h.includes('code'));
+  if (idIdx >= 0) document.getElementById('colPmgBulkSubId').value = idIdx;
+  
+  const nameIdx = headersLower.findIndex(h => h.includes('nom') || h.includes('name') || h.includes('libelle') || h.includes('libellé') || h.includes('processus') || h.includes('label'));
+  if (nameIdx >= 0) document.getElementById('colPmgBulkSubName').value = nameIdx;
+  
+  const parentIdx = headersLower.findIndex(h => h.includes('parent') || h.includes('parent_id') || h.includes('parentid') || h.includes('parent_process'));
+  if (parentIdx >= 0) document.getElementById('colPmgBulkSubParent').value = parentIdx;
+  
+  const levelIdx = headersLower.findIndex(h => h.includes('level') || h.includes('niveau') || h.includes('hiérarchie') || h.includes('hierarchie'));
+  if (levelIdx >= 0) document.getElementById('colPmgBulkSubLevel').value = levelIdx;
+  
+  const stakeholderIdx = headersLower.findIndex(h => h.includes('partie') || h.includes('acteur') || h.includes('role') || h.includes('rôle') || h.includes('entite') || h.includes('entité') || h.includes('stakeholder') || h.includes('entity'));
+  if (stakeholderIdx >= 0) document.getElementById('colPmgBulkStakeholder').value = stakeholderIdx;
+  
+  const inputsIdx = headersLower.findIndex(h => h.includes('input') || h.includes('entrée') || h.includes('entree'));
+  if (inputsIdx >= 0) document.getElementById('colPmgBulkVarInputs').value = inputsIdx;
+  
+  const outputsIdx = headersLower.findIndex(h => h.includes('output') || h.includes('sortie') || h.includes('sorties'));
+  if (outputsIdx >= 0) document.getElementById('colPmgBulkVarOutputs').value = outputsIdx;
+  
+  const varNameIdx = headersLower.findIndex(h => h.includes('variable') || h.includes('var') || h.includes('nom_var') || h.includes('nom variable'));
+  if (varNameIdx >= 0) document.getElementById('colPmgBulkVarName').value = varNameIdx;
+  
+  const typeIdx = headersLower.findIndex(h => h.includes('type') || h.includes('flux') || h.includes('direction'));
+  if (typeIdx >= 0) document.getElementById('colPmgBulkVarType').value = typeIdx;
+
+  const caseIdx = headersLower.findIndex(h => h.includes('cas') || h.includes('condition') || h.includes('règle') || h.includes('rule'));
+  if (caseIdx >= 0) document.getElementById('colPmgBulkCase').value = caseIdx;
+
+  const commentIdx = headersLower.findIndex(h => h.includes('commentaire') || h.includes('comment') || h.includes('note'));
+  if (commentIdx >= 0) document.getElementById('colPmgBulkComment').value = commentIdx;
+  
+  document.getElementById('btnPmgBulkFinish').disabled = false;
+  window.updatePmgBulkPreview();
+};
+
+// Previews
+window.updatePmgStepPreview = function(step) {
+  const fileData = window.pmgUploadedFiles['step' + step];
+  if (!fileData) return;
+  
+  const raw = fileData.raw;
+  const previewBox = document.getElementById(`previewBoxPmgStep${step}`);
+  if (!previewBox) return;
+  
+  let html = '';
+  const count = Math.min(raw.length, 4);
+  
+  if (step === 1) {
+    const colId = parseInt(document.getElementById('colPmgSubId').value, 10);
+    const colName = parseInt(document.getElementById('colPmgSubName').value, 10);
+    const colParent = parseInt(document.getElementById('colPmgSubParent').value, 10);
+    const colLevel = parseInt(document.getElementById('colPmgSubLevel').value, 10);
+    
+    html += `<strong>Total lignes : ${raw.length}</strong><br>`;
+    for (let i = 0; i < count; i++) {
+      const idVal = raw[i][colId] || '';
+      const nameVal = raw[i][colName] || '';
+      const parentVal = colParent >= 0 ? raw[i][colParent] || 'Aucun' : 'Aucun';
+      const levelVal = colLevel >= 0 ? raw[i][colLevel] || '1' : '1';
+      html += `• ID: <span style="color:var(--brand-primary);">${idVal}</span> | Nom: <span>${nameVal}</span> | Parent: <span>${parentVal}</span> | Niveau: <span>${levelVal}</span><br>`;
+    }
+    
+  } else if (step === 2) {
+    const style = document.getElementById('pmgVarMappingStyle').value;
+    html += `<strong>Total lignes : ${raw.length}</strong><br>`;
+    
+    if (style === 'separate') {
+      const colSubId = parseInt(document.getElementById('colPmgVarSubIdSep').value, 10);
+      const colIn = parseInt(document.getElementById('colPmgVarInputs').value, 10);
+      const colOut = parseInt(document.getElementById('colPmgVarOutputs').value, 10);
+      
+      for (let i = 0; i < count; i++) {
+        const subIdVal = raw[i][colSubId] || '';
+        const inVal = colIn >= 0 ? raw[i][colIn] || 'Aucune' : 'Aucune';
+        const outVal = colOut >= 0 ? raw[i][colOut] || 'Aucune' : 'Aucune';
+        html += `• Sous-processus ID: <span style="color:var(--brand-primary);">${subIdVal}</span> | Inputs: <span>${inVal}</span> | Outputs: <span>${outVal}</span><br>`;
+      }
+    } else {
+      const colSubId = parseInt(document.getElementById('colPmgVarSubIdRow').value, 10);
+      const colName = parseInt(document.getElementById('colPmgVarName').value, 10);
+      const colType = parseInt(document.getElementById('colPmgVarType').value, 10);
+      
+      for (let i = 0; i < count; i++) {
+        const subIdVal = raw[i][colSubId] || '';
+        const varNameVal = raw[i][colName] || '';
+        const typeVal = raw[i][colType] || '';
+        html += `• Sous-processus ID: <span style="color:var(--brand-primary);">${subIdVal}</span> | Variable: <span>${varNameVal}</span> | Type: <span>${typeVal}</span><br>`;
+      }
+    }
+    
+  } else if (step === 3) {
+    const colSubId = parseInt(document.getElementById('colPmgStakeholderSubId').value, 10);
+    const colName = parseInt(document.getElementById('colPmgStakeholderName').value, 10);
+    
+    html += `<strong>Total lignes : ${raw.length}</strong><br>`;
+    for (let i = 0; i < count; i++) {
+      const subIdVal = raw[i][colSubId] || '';
+      const nameVal = raw[i][colName] || '';
+      html += `• Sous-processus ID: <span style="color:var(--brand-primary);">${subIdVal}</span> | Acteur: <span>${nameVal}</span><br>`;
+    }
+  }
+  
+  previewBox.innerHTML = html;
+};
+
+window.updatePmgBulkPreview = function() {
+  const fileData = window.pmgUploadedFiles['bulk'];
+  if (!fileData) return;
+  
+  const raw = fileData.raw;
+  const previewBox = document.getElementById('previewBoxPmgBulk');
+  if (!previewBox) return;
+  
+  const colId = parseInt(document.getElementById('colPmgBulkSubId').value, 10);
+  const colName = parseInt(document.getElementById('colPmgBulkSubName').value, 10);
+  const colParent = parseInt(document.getElementById('colPmgBulkSubParent').value, 10);
+  const colLevel = parseInt(document.getElementById('colPmgBulkSubLevel').value, 10);
+  const colStake = parseInt(document.getElementById('colPmgBulkStakeholder').value, 10);
+  
+  let html = `<strong>Total lignes : ${raw.length}</strong><br>`;
+  const count = Math.min(raw.length, 4);
+  
+  for (let i = 0; i < count; i++) {
+    const idVal = raw[i][colId] || '';
+    const nameVal = raw[i][colName] || '';
+    const parentVal = colParent >= 0 ? raw[i][colParent] || 'Aucun' : 'Aucun';
+    const levelVal = colLevel >= 0 ? raw[i][colLevel] || '1' : '1';
+    const stakeVal = colStake >= 0 ? raw[i][colStake] || 'Non défini' : 'Non défini';
+    html += `• ID: <span style="color:var(--brand-primary);">${idVal}</span> | Nom: <span>${nameVal}</span> | Parent: <span>${parentVal}</span> | Niveau: <span>${levelVal}</span> | Acteur: <span>${stakeVal}</span><br>`;
+  }
+  
+  previewBox.innerHTML = html;
+};
+
+// Validation steps logic
+window.validatePmgStep1 = function() {
+  const fileData = window.pmgUploadedFiles['step1'];
+  if (!fileData) {
+    alert("Veuillez d'abord charger un fichier pour l'étape 1.");
+    return;
+  }
+  
+  const colId = parseInt(document.getElementById('colPmgSubId').value, 10);
+  const colName = parseInt(document.getElementById('colPmgSubName').value, 10);
+  const colParent = parseInt(document.getElementById('colPmgSubParent').value, 10);
+  const colLevel = parseInt(document.getElementById('colPmgSubLevel').value, 10);
+  
+  if (isNaN(colId) || isNaN(colName)) {
+    alert("Veuillez mapper l'ID et le Nom du sous-processus.");
+    return;
+  }
+  
+  window.pmgTempSubprocesses = [];
+  const idSet = new Set();
+  
+  fileData.raw.forEach(row => {
+    const subId = String(row[colId] || '').trim();
+    const name = String(row[colName] || '').trim();
+    const parentId = colParent >= 0 ? String(row[colParent] || '').trim() : '';
+    const level = colLevel >= 0 ? parseInt(row[colLevel], 10) || 1 : 1;
+    
+    if (subId && !idSet.has(subId)) {
+      idSet.add(subId);
+      window.pmgTempSubprocesses.push({
+        id: subId,
+        name: name || `(Sous-processus ${subId})`,
+        parentId: parentId,
+        level: level,
+        inputs: [],
+        outputs: [],
+        entity: 'Non défini'
+      });
+    }
+  });
+  
+  if (window.pmgTempSubprocesses.length === 0) {
+    alert("Aucun sous-processus valide trouvé dans le fichier.");
+    return;
+  }
+  
+  alert(`${window.pmgTempSubprocesses.length} sous-processus importés.`);
+  
+  // Update UI node classes
+  document.getElementById('step-node-1').className = 'step-node completed';
+  document.getElementById('step-node-2').className = 'step-node active';
+  document.getElementById('pmg-step-panel-1').style.display = 'none';
+  document.getElementById('pmg-step-panel-2').style.display = 'block';
+  window.pmgActiveStep = 2;
+  document.getElementById('pmgStepperProgress').style.width = '34%';
+  
+  if (window.pmgUseSingleFile) {
+    window.pmgUploadedFiles['step2'] = { ...fileData };
+    document.getElementById('mappingSectionPmgStep2').style.display = 'block';
+    window.populatePmgStepMappingDropdowns(2);
+  }
+};
+
+window.validatePmgStep2 = function() {
+  const fileData = window.pmgUploadedFiles['step2'];
+  if (!fileData) {
+    alert("Veuillez charger un fichier pour l'étape 2.");
+    return;
+  }
+  
+  const style = document.getElementById('pmgVarMappingStyle').value;
+  let importedCount = 0;
+  
+  if (style === 'separate') {
+    const colSubId = parseInt(document.getElementById('colPmgVarSubIdSep').value, 10);
+    const colIn = parseInt(document.getElementById('colPmgVarInputs').value, 10);
+    const colOut = parseInt(document.getElementById('colPmgVarOutputs').value, 10);
+    const sep = document.getElementById('pmgVarSeparator').value || ',';
+    
+    if (isNaN(colSubId)) {
+      alert("Veuillez mapper l'ID du sous-processus.");
+      return;
+    }
+    
+    fileData.raw.forEach(row => {
+      const subId = String(row[colSubId] || '').trim();
+      if (!subId) return;
+      
+      const sub = window.pmgTempSubprocesses.find(s => s.id === subId);
+      if (!sub) return;
+      
+      if (colIn >= 0) {
+        const inText = String(row[colIn] || '');
+        const inVars = inText.split(sep).map(v => v.trim()).filter(v => v);
+        inVars.forEach(v => {
+          if (!sub.inputs.includes(v)) {
+            sub.inputs.push(v);
+            importedCount++;
+          }
+        });
+      }
+      
+      if (colOut >= 0) {
+        const outText = String(row[colOut] || '');
+        const outVars = outText.split(sep).map(v => v.trim()).filter(v => v);
+        outVars.forEach(v => {
+          if (!sub.outputs.includes(v)) {
+            sub.outputs.push(v);
+            importedCount++;
+          }
+        });
+      }
+    });
+    
+  } else {
+    const colSubId = parseInt(document.getElementById('colPmgVarSubIdRow').value, 10);
+    const colName = parseInt(document.getElementById('colPmgVarName').value, 10);
+    const colType = parseInt(document.getElementById('colPmgVarType').value, 10);
+    const inValText = (document.getElementById('pmgVarValInput').value || 'Input').toLowerCase();
+    const outValText = (document.getElementById('pmgVarValOutput').value || 'Output').toLowerCase();
+    
+    if (isNaN(colSubId) || isNaN(colName) || isNaN(colType)) {
+      alert("Veuillez mapper l'ID du sous-processus, le nom et le type de variable.");
+      return;
+    }
+    
+    fileData.raw.forEach(row => {
+      const subId = String(row[colSubId] || '').trim();
+      const varName = String(row[colName] || '').trim();
+      const rawType = String(row[colType] || '').trim().toLowerCase();
+      
+      if (!subId || !varName) return;
+      
+      const sub = window.pmgTempSubprocesses.find(s => s.id === subId);
+      if (!sub) return;
+      
+      if (rawType.includes(inValText)) {
+        if (!sub.inputs.includes(varName)) {
+          sub.inputs.push(varName);
+          importedCount++;
+        }
+      } else if (rawType.includes(outValText)) {
+        if (!sub.outputs.includes(varName)) {
+          sub.outputs.push(varName);
+          importedCount++;
+        }
+      }
+    });
+  }
+  
+  alert(`${importedCount} variables associées.`);
+  
+  document.getElementById('step-node-2').className = 'step-node completed';
+  document.getElementById('step-node-3').className = 'step-node active';
+  document.getElementById('pmg-step-panel-2').style.display = 'none';
+  document.getElementById('pmg-step-panel-3').style.display = 'block';
+  window.pmgActiveStep = 3;
+  document.getElementById('pmgStepperProgress').style.width = '68%';
+  
+  if (window.pmgUseSingleFile) {
+    window.pmgUploadedFiles['step3'] = { ...window.pmgUploadedFiles['step1'] };
+    document.getElementById('mappingSectionPmgStep3').style.display = 'block';
+    window.populatePmgStepMappingDropdowns(3);
+  }
+};
+
+window.validatePmgStep3AndFinish = function() {
+  const fileData = window.pmgUploadedFiles['step3'];
+  if (!fileData) {
+    alert("Veuillez charger un fichier pour l'étape 3.");
+    return;
+  }
+  
+  const colSubId = parseInt(document.getElementById('colPmgStakeholderSubId').value, 10);
+  const colName = parseInt(document.getElementById('colPmgStakeholderName').value, 10);
+  
+  if (isNaN(colSubId) || isNaN(colName)) {
+    alert("Veuillez mapper l'ID du sous-processus et le rôle/acteur.");
+    return;
+  }
+  
+  let stCount = 0;
+  
+  fileData.raw.forEach(row => {
+    const subId = String(row[colSubId] || '').trim();
+    const stakeName = String(row[colName] || '').trim();
+    if (!subId || !stakeName) return;
+    
+    const sub = window.pmgTempSubprocesses.find(s => s.id === subId);
+    if (sub) {
+      if (sub.entity === 'Non défini' || !sub.entity) {
+        sub.entity = stakeName;
+      } else {
+        const list = sub.entity.split(', ').map(s => s.trim());
+        if (!list.includes(stakeName)) {
+          sub.entity = list.concat([stakeName]).join(', ');
+        }
+      }
+      stCount++;
+    }
+  });
+  
+  // Build final window.pmgActivities
+  window.pmgActivities = window.pmgTempSubprocesses.map(sub => {
+    return {
+      id: sub.id,
+      name: sub.name,
+      type: 'callactivity',
+      typeLabel: 'Call Activity',
+      entity: sub.entity || 'Non défini',
+      inputs: sub.inputs || [],
+      outputs: sub.outputs || [],
+      applicableCase: '',
+      comment: '',
+      parentId: sub.parentId || '',
+      level: sub.level || 1
+    };
+  });
+  
+  const processId = window.pmgActivities[0]?.parentId || 'custom-process';
+  window.pmgProcessDetails = {
+    id: processId,
+    name: window.pmgActivities[0]?.parentId ? `Processus ${window.pmgActivities[0].parentId}` : 'Processus Personnalisé',
+    isExecutable: 'false',
+    exporter: 'FlowAudit Pro (Import par étape)',
+    exporterVersion: '1.0.0',
+    version: '1.0.0',
+    owner: window.pmgActivities[0]?.entity || 'Non spécifié',
+    desc: 'Cartographie de sous-processus importée par étape.'
+  };
+  
+  alert("Importation terminée ! Matrice PMG générée.");
+  window.analyzePmg();
+};
+
+window.validatePmgBulkAndFinish = function() {
+  const fileData = window.pmgUploadedFiles['bulk'];
+  if (!fileData) {
+    alert("Veuillez charger le fichier unique.");
+    return;
+  }
+  
+  const colId = parseInt(document.getElementById('colPmgBulkSubId').value, 10);
+  const colName = parseInt(document.getElementById('colPmgBulkSubName').value, 10);
+  const colParent = parseInt(document.getElementById('colPmgBulkSubParent').value, 10);
+  const colLevel = parseInt(document.getElementById('colPmgBulkSubLevel').value, 10);
+  const colStake = parseInt(document.getElementById('colPmgBulkStakeholder').value, 10);
+  const colCase = parseInt(document.getElementById('colPmgBulkCase').value, 10);
+  const colComment = parseInt(document.getElementById('colPmgBulkComment').value, 10);
+  
+  if (isNaN(colId) || isNaN(colName)) {
+    alert("Veuillez mapper l'ID et le Nom du sous-processus.");
+    return;
+  }
+  
+  const style = document.getElementById('pmgBulkVarMappingStyle').value;
+  const tempMap = new Map();
+  
+  fileData.raw.forEach(row => {
+    const subId = String(row[colId] || '').trim();
+    if (!subId) return;
+    
+    if (!tempMap.has(subId)) {
+      const name = String(row[colName] || '').trim();
+      const parentId = colParent >= 0 ? String(row[colParent] || '').trim() : '';
+      const level = colLevel >= 0 ? parseInt(row[colLevel], 10) || 1 : 1;
+      const stake = colStake >= 0 ? String(row[colStake] || '').trim() : 'Non défini';
+      const caseVal = colCase >= 0 ? String(row[colCase] || '').trim() : '';
+      const commentVal = colComment >= 0 ? String(row[colComment] || '').trim() : '';
+      
+      tempMap.set(subId, {
+        id: subId,
+        name: name || `(Sous-processus ${subId})`,
+        parentId: parentId,
+        level: level,
+        entity: stake || 'Non défini',
+        inputs: [],
+        outputs: [],
+        applicableCase: caseVal,
+        comment: commentVal
+      });
+    }
+    
+    const sub = tempMap.get(subId);
+    
+    if (style === 'separate') {
+      const colIn = parseInt(document.getElementById('colPmgBulkVarInputs').value, 10);
+      const colOut = parseInt(document.getElementById('colPmgBulkVarOutputs').value, 10);
+      const sep = document.getElementById('pmgBulkVarSeparator').value || ',';
+      
+      if (colIn >= 0) {
+        const inText = String(row[colIn] || '');
+        const inVars = inText.split(sep).map(v => v.trim()).filter(v => v);
+        inVars.forEach(v => {
+          if (!sub.inputs.includes(v)) sub.inputs.push(v);
+        });
+      }
+      
+      if (colOut >= 0) {
+        const outText = String(row[colOut] || '');
+        const outVars = outText.split(sep).map(v => v.trim()).filter(v => v);
+        outVars.forEach(v => {
+          if (!sub.outputs.includes(v)) sub.outputs.push(v);
+        });
+      }
+    } else {
+      const colVarName = parseInt(document.getElementById('colPmgBulkVarName').value, 10);
+      const colVarType = parseInt(document.getElementById('colPmgBulkVarType').value, 10);
+      const inValText = (document.getElementById('pmgBulkVarValInput').value || 'Input').toLowerCase();
+      const outValText = (document.getElementById('pmgBulkVarValOutput').value || 'Output').toLowerCase();
+      
+      if (colVarName >= 0 && colVarType >= 0) {
+        const varName = String(row[colVarName] || '').trim();
+        const rawType = String(row[colVarType] || '').trim().toLowerCase();
+        
+        if (varName) {
+          if (rawType.includes(inValText)) {
+            if (!sub.inputs.includes(varName)) sub.inputs.push(varName);
+          } else if (rawType.includes(outValText)) {
+            if (!sub.outputs.includes(varName)) sub.outputs.push(varName);
+          }
+        }
+      }
+    }
+  });
+  
+  if (tempMap.size === 0) {
+    alert("Aucun sous-processus valide trouvé.");
+    return;
+  }
+  
+  window.pmgActivities = Array.from(tempMap.values()).map(sub => {
+    return {
+      id: sub.id,
+      name: sub.name,
+      type: 'callactivity',
+      typeLabel: 'Call Activity',
+      entity: sub.entity || 'Non défini',
+      inputs: sub.inputs || [],
+      outputs: sub.outputs || [],
+      applicableCase: sub.applicableCase || '',
+      comment: sub.comment || '',
+      parentId: sub.parentId || '',
+      level: sub.level || 1
+    };
+  });
+  
+  window.pmgProcessDetails = {
+    id: window.pmgActivities[0]?.parentId || 'bulk-process',
+    name: window.pmgActivities[0]?.parentId ? `Processus ${window.pmgActivities[0].parentId}` : 'Processus Bulk',
+    isExecutable: 'false',
+    exporter: 'FlowAudit Pro (Import en masse)',
+    exporterVersion: '1.0.0',
+    version: '1.0.0',
+    owner: window.pmgActivities[0]?.entity || 'Non spécifié',
+    desc: 'Cartographie importée en masse à partir d\'un fichier plat.'
+  };
+  
+  alert(`Importation en masse terminée ! ${window.pmgActivities.length} sous-processus importés.`);
+  window.analyzePmg();
+};
+
 let pmgListenersRegistered = false;
 let pmgSearchQuery = '';
 let pmgTypeFilter = 'all';
@@ -498,6 +1317,49 @@ window.resetPmgMatrixFilters = function() {
   renderPmgMatrix();
 };
 
+// Hierarchical Sorter for activities
+function sortActivitiesHierarchically(acts) {
+  const hasParent = acts.some(a => a.parentId);
+  if (!hasParent) return acts;
+
+  const idMap = new Map();
+  acts.forEach(a => idMap.set(a.id, a));
+
+  const rootNodes = [];
+  const parentToChildren = new Map();
+
+  acts.forEach(a => {
+    if (a.parentId && idMap.has(a.parentId)) {
+      if (!parentToChildren.has(a.parentId)) {
+        parentToChildren.set(a.parentId, []);
+      }
+      parentToChildren.get(a.parentId).push(a);
+    } else {
+      rootNodes.push(a);
+    }
+  });
+
+  const result = [];
+  function traverse(node, currentLevel) {
+    if (!node.level) {
+      node.level = currentLevel;
+    }
+    result.push(node);
+    const children = parentToChildren.get(node.id) || [];
+    children.forEach(child => traverse(child, currentLevel + 1));
+  }
+
+  rootNodes.forEach(root => traverse(root, 1));
+  
+  acts.forEach(a => {
+    if (!result.includes(a)) {
+      result.push(a);
+    }
+  });
+
+  return result;
+}
+
 // Render PMG activities table rows
 window.renderPmgMatrix = function() {
   const tbody = document.getElementById('pmgMatrixTableBody');
@@ -542,7 +1404,9 @@ window.renderPmgMatrix = function() {
   
   if (empty) empty.style.display = 'none';
   
-  tbody.innerHTML = filtered.map(act => {
+  const sorted = sortActivitiesHierarchically(filtered);
+  
+  tbody.innerHTML = sorted.map(act => {
     const inputsHtml = act.inputs.length > 0 
       ? `<div class="pmg-io-container">${act.inputs.map(i => `<span class="badge-io badge-io-in" title="${esc(i)}">${esc(i)}</span>`).join('')}</div>` 
       : '<span style="color:var(--text-tertiary);font-size:11px;font-style:italic;">Aucune entrée</span>';
@@ -554,10 +1418,16 @@ window.renderPmgMatrix = function() {
     let badgeClass = 'type-task';
     if (act.type === 'callactivity') badgeClass = 'type-subprocess';
     
+    const indent = (act.level && act.level > 1) ? (act.level - 1) * 20 : 0;
+    const arrow = indent > 0 ? '<span style="color:var(--text-tertiary);margin-right:6px;font-family:sans-serif;">↳</span>' : '';
+    
     return `
       <tr>
-        <td>
-          <strong style="color:var(--text-primary); font-weight:600;">${esc(act.name)}</strong><br>
+        <td style="padding-left: ${indent + 8}px;">
+          ${arrow}
+          <strong style="color:var(--text-primary); font-weight:600;">${esc(act.name)}</strong>
+          ${act.parentId ? `<span style="font-size:10px;color:var(--text-tertiary);margin-left:8px;">(Parent: ${esc(act.parentId)})</span>` : ''}
+          <br>
           <span class="mono" style="font-size:10px;color:var(--text-tertiary);">${act.id}</span>
         </td>
         <td>

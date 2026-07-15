@@ -1053,6 +1053,20 @@ function switchTab(name){
   const panel = document.getElementById('panel-'+name);
   if(panel) panel.classList.add('active');
 
+  // Gérer l'état actif du menu latéral pour le guide d'utilisation
+  if (name === 'guide') {
+    document.querySelectorAll('.menu-header').forEach(h => {
+      if (h.id === 'btn-mod-guide') {
+        h.classList.add('active');
+      } else if (!h.closest('#group-guide')) {
+        h.classList.remove('active');
+      }
+    });
+  } else {
+    const guideHeader = document.getElementById('btn-mod-guide');
+    if (guideHeader) guideHeader.classList.remove('active');
+  }
+
   // Mise à jour dynamique du titre dans l'en-tête principal
   const titles = {
     'import': 'Importation des données',
@@ -1070,7 +1084,10 @@ function switchTab(name){
     'bpmn-naming-results': 'Rapport d\'Audit de Nommage BPMN',
     'pmg-import': 'Importation du BPMN (PMG)',
     'pmg-dashboard': 'Étude & Gouvernance PMG',
-    'pmg-matrix': 'Matrice des Activités PMG'
+    'pmg-matrix': 'Matrice des Activités PMG',
+    'roi-calculator': 'Calculateur de ROI & Gain de Temps',
+    'roi-config': 'Configuration du Calculateur ROI',
+    'guide': 'Guide d\'utilisation'
   };
   const pageTitleEl = document.getElementById('pageTitle');
   if (pageTitleEl && titles[name]) {
@@ -2019,20 +2036,26 @@ window.switchModule = function(moduleName) {
   const btnSubs = document.getElementById('btn-mod-subprocesses');
   const btnBpmn = document.getElementById('btn-mod-bpmn-naming');
   const btnPmg = document.getElementById('btn-mod-pmg');
+  const btnRoi = document.getElementById('btn-mod-roi');
   if (btnVars) btnVars.classList.toggle('active', moduleName === 'variables');
   if (btnSubs) btnSubs.classList.toggle('active', moduleName === 'subprocesses');
   if (btnBpmn) btnBpmn.classList.toggle('active', moduleName === 'bpmn-naming');
   if (btnPmg) btnPmg.classList.toggle('active', moduleName === 'pmg');
+  if (btnRoi) btnRoi.classList.toggle('active', moduleName === 'roi');
+  const guideHeader = document.getElementById('btn-mod-guide');
+  if (guideHeader) guideHeader.classList.remove('active');
 
   // Mettre à jour l'expansion des groupes de menu
   const groupVars = document.getElementById('group-variables');
   const groupSubs = document.getElementById('group-subprocesses');
   const groupBpmn = document.getElementById('group-bpmn-naming');
   const groupPmg = document.getElementById('group-pmg');
+  const groupRoi = document.getElementById('group-roi');
   if (groupVars) groupVars.classList.toggle('expanded', moduleName === 'variables');
   if (groupSubs) groupSubs.classList.toggle('expanded', moduleName === 'subprocesses');
   if (groupBpmn) groupBpmn.classList.toggle('expanded', moduleName === 'bpmn-naming');
   if (groupPmg) groupPmg.classList.toggle('expanded', moduleName === 'pmg');
+  if (groupRoi) groupRoi.classList.toggle('expanded', moduleName === 'roi');
 
   // Onglets variables
   const varTabIds = ['import', 'config', 'resultsTab', 'dashTab', 'graphTab', 'rankTab', 'histTab'];
@@ -2099,10 +2122,16 @@ window.switchModule = function(moduleName) {
           el.style.display = '';
         }
       } else {
-        el.style.display = '';
+        el.style.display = 'none'; // Fixed bug from original code where this was ''
       }
-    } else {
-      el.style.display = 'none';
+    }
+  });
+
+  const roiTabIds = ['roiCalcTab', 'roiConfigTab'];
+  roiTabIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.display = moduleName === 'roi' ? '' : 'none';
     }
   });
 
@@ -2118,6 +2147,11 @@ window.switchModule = function(moduleName) {
     switchTab('pmg-import');
     if (typeof initPmgModule === 'function') {
       initPmgModule();
+    }
+  } else if (moduleName === 'roi') {
+    switchTab('roi-calculator');
+    if (typeof initRoiModule === 'function') {
+      initRoiModule();
     }
   }
 }
@@ -2585,6 +2619,7 @@ window.renderSubprocessMap = function() {
   if (!container) return;
 
   const showLoopsOnly = document.getElementById('subGraphLoopsOnly')?.checked || false;
+  const showCommonOnly = document.getElementById('subGraphCommonOnly')?.checked || false;
   const parentFilters = getSelectedCheckboxValues('subParentList');
   const childFilters = getSelectedCheckboxValues('subChildList');
 
@@ -2596,6 +2631,19 @@ window.renderSubprocessMap = function() {
   const nodesMap = new Map();
   const edges = [];
 
+  // Précalculer le nombre de parents par sous-processus
+  const subToParents = {};
+  allSubprocessRows.forEach(r => {
+    const child = r.subprocess;
+    const parent = r.parentProcess;
+    if (child && child !== '(Sous-processus non défini)' && parent) {
+      if (!subToParents[child]) {
+        subToParents[child] = new Set();
+      }
+      subToParents[child].add(parent);
+    }
+  });
+
   allSubprocessRows.forEach(r => {
     if (showLoopsOnly && !r.inLoop) return;
 
@@ -2603,6 +2651,12 @@ window.renderSubprocessMap = function() {
     const child = r.subprocess;
 
     if (!parent) return;
+
+    if (showCommonOnly) {
+      if (!child || child === '(Sous-processus non défini)' || !subToParents[child] || subToParents[child].size <= 1) {
+        return;
+      }
+    }
 
     if (parentFilters.length > 0 && !parentFilters.includes(parent)) return;
     if (childFilters.length > 0 && child && !childFilters.includes(child)) return;
@@ -2650,8 +2704,13 @@ window.renderSubprocessMap = function() {
 
   const nodes = Array.from(nodesMap.values());
 
+  const kpiGrid = document.getElementById('subMapKpiGrid');
+  const sidebarContent = document.getElementById('subMapAnalysisContent');
+
   if (nodes.length === 0) {
     container.innerHTML = '<div class="empty-state" style="padding:4rem; height: 100%; display: flex; flex-direction: column; justify-content: center;"><div class="empty-icon">⚯</div>Aucune relation à cartographier.</div>';
+    if (kpiGrid) kpiGrid.style.display = 'none';
+    if (sidebarContent) sidebarContent.innerHTML = '<p style="font-style: italic; color: var(--text-tertiary);">Aucune donnée disponible avec les filtres actuels.</p>';
     return;
   }
 
@@ -2661,6 +2720,131 @@ window.renderSubprocessMap = function() {
     const key = e.from + '_' + e.to;
     if(!edgeSet.has(key)) { edgeSet.add(key); uniqueEdges.push(e); }
   });
+
+  // Mettre à jour les KPIs
+  const visibleParents = nodes.filter(n => n.group === 'process').length;
+  const visibleChildren = nodes.filter(n => n.group === 'subprocess').length;
+  const visibleRelations = uniqueEdges.length;
+  const reusabilityRate = visibleChildren > 0 ? (visibleRelations / visibleChildren).toFixed(1) : '0.0';
+
+  if (kpiGrid) {
+    kpiGrid.style.display = 'grid';
+    document.getElementById('kpi-sub-map-parents').textContent = visibleParents;
+    document.getElementById('kpi-sub-map-children').textContent = visibleChildren;
+    document.getElementById('kpi-sub-map-reusability').textContent = reusabilityRate;
+    document.getElementById('kpi-sub-map-relations').textContent = visibleRelations;
+  }
+
+  // Générer les analyses détaillées
+  if (sidebarContent) {
+    let analysisHtml = '';
+
+    // Groupement enfant -> parents
+    const childToParentsMap = {};
+    // Groupement parent -> enfants
+    const parentToChildrenMap = {};
+    let visibleLoops = 0;
+
+    uniqueEdges.forEach(e => {
+      const parentName = nodesMap.get(e.from)?.label;
+      const childName = nodesMap.get(e.to)?.label;
+      if (parentName && childName) {
+        if (!childToParentsMap[childName]) childToParentsMap[childName] = [];
+        childToParentsMap[childName].push(parentName);
+
+        if (!parentToChildrenMap[parentName]) parentToChildrenMap[parentName] = [];
+        parentToChildrenMap[parentName].push(childName);
+        
+        const edgeRow = allSubprocessRows.find(r => r.parentProcess === parentName && r.subprocess === childName);
+        if (edgeRow && edgeRow.inLoop) {
+          visibleLoops++;
+        }
+      }
+    });
+
+    // 1. Alerte boucles circulaires
+    if (visibleLoops > 0) {
+      analysisHtml += `
+        <div style="background:var(--err-light); border:1px solid var(--err); color:var(--text-primary); padding:10px; border-radius:var(--border-radius-md); margin-bottom:10px;">
+          <span style="font-weight:600; color:var(--err); display:flex; align-items:center; gap:4px;">⚠️ Dépendances Circulaires</span>
+          <p style="margin-top:4px; font-size:11px; line-height:1.4;">Il y a <strong>${visibleLoops}</strong> liaison(s) impliquée(s) dans une boucle infinie de dépendance dans la vue actuelle.</p>
+        </div>
+      `;
+    }
+
+    // 2. Sous-processus partagés
+    const sortedChildren = Object.entries(childToParentsMap)
+      .sort((a, b) => b[1].length - a[1].length);
+
+    analysisHtml += `
+      <div style="margin-bottom: 10px;">
+        <h5 style="font-size:12px; font-weight:600; color:var(--text-primary); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:4px;">
+          <span>🔗 Réutilisation (Top Partagés)</span>
+          <span style="font-size:10px; color:var(--text-tertiary); font-weight:normal;">Total: ${sortedChildren.filter(c => c[1].length > 1).length}</span>
+        </h5>
+    `;
+
+    if (sortedChildren.length > 0) {
+      analysisHtml += '<div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; padding-right:2px;">';
+      sortedChildren.slice(0, 5).forEach(([name, parents]) => {
+        const isShared = parents.length > 1;
+        analysisHtml += `
+          <div style="background:var(--bg-card-hover); border:1px solid var(--border-color); padding:8px; border-radius:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+              <span style="font-weight:600; color:${isShared ? 'var(--brand-primary)' : 'var(--text-primary)'}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(name)}">${esc(name)}</span>
+              <span style="font-size:9px; background:${isShared ? 'var(--brand-light)' : 'var(--border-color)'}; color:${isShared ? 'var(--brand-primary)' : 'var(--text-secondary)'}; padding:1px 5px; border-radius:10px; font-weight:bold; flex-shrink:0;">
+                ${parents.length} parent${parents.length > 1 ? 's' : ''}
+              </span>
+            </div>
+            <div style="font-size:10px; color:var(--text-tertiary); overflow:hidden; text-overflow:ellipsis; display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+              ${parents.map(p => `<span style="background:var(--bg-card); border:1px solid var(--border-color); padding:1px 4px; border-radius:3px; font-size:9px;">${esc(p)}</span>`).join('')}
+            </div>
+          </div>
+        `;
+      });
+      analysisHtml += '</div>';
+    } else {
+      analysisHtml += '<p style="font-style:italic; font-size:11px; color:var(--text-tertiary);">Aucun sous-processus visible.</p>';
+    }
+    analysisHtml += '</div>';
+
+    // 3. Processus parents complexes
+    const sortedParents = Object.entries(parentToChildrenMap)
+      .sort((a, b) => b[1].length - a[1].length);
+
+    analysisHtml += `
+      <div>
+        <h5 style="font-size:12px; font-weight:600; color:var(--text-primary); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:4px;">
+          <span>⚙️ Complexité (Top Appels)</span>
+          <span style="font-size:10px; color:var(--text-tertiary); font-weight:normal;">Total: ${sortedParents.length}</span>
+        </h5>
+    `;
+
+    if (sortedParents.length > 0) {
+      analysisHtml += '<div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; padding-right:2px;">';
+      sortedParents.slice(0, 5).forEach(([name, children]) => {
+        analysisHtml += `
+          <div style="background:var(--bg-card-hover); border:1px solid var(--border-color); padding:8px; border-radius:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+              <span style="font-weight:600; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(name)}">${esc(name)}</span>
+              <span style="font-size:9px; background:var(--info-light); color:var(--info); padding:1px 5px; border-radius:10px; font-weight:bold; flex-shrink:0;">
+                ${children.length} appel${children.length > 1 ? 's' : ''}
+              </span>
+            </div>
+            <div style="font-size:10px; color:var(--text-tertiary); overflow:hidden; text-overflow:ellipsis; display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+              ${children.map(c => `<span style="background:var(--bg-card); border:1px solid var(--border-color); padding:1px 4px; border-radius:3px; font-size:9px;">${esc(c)}</span>`).join('')}
+            </div>
+          </div>
+        `;
+      });
+      analysisHtml += '</div>';
+    } else {
+      analysisHtml += '<p style="font-style:italic; font-size:11px; color:var(--text-tertiary);">Aucun processus parent visible.</p>';
+    }
+    analysisHtml += '</div>';
+
+    sidebarContent.innerHTML = analysisHtml;
+  }
 
   const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(uniqueEdges) };
 
@@ -2733,6 +2917,8 @@ window.resetSubGraphFilters = function() {
   }
   const checkLoop = document.getElementById('subGraphLoopsOnly');
   if (checkLoop) checkLoop.checked = false;
+  const checkCommon = document.getElementById('subGraphCommonOnly');
+  if (checkCommon) checkCommon.checked = false;
   
   const pInput = document.getElementById('searchSubParentInput');
   const cInput = document.getElementById('searchSubChildInput');
