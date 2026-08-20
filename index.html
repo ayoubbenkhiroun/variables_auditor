@@ -433,14 +433,14 @@
         <!-- Panel Import -->
         <div class="panel active" id="panel-import">
           <div class="upload-zone" id="dropZone">
-            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.bpmn,.xml">
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.bpmn,.xml" multiple>
             <svg viewBox="0 0 24 24">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
-            <div class="upload-title" id="uploadTitle">Déposer un fichier Excel, CSV ou BPMN</div>
-            <div class="upload-sub" id="uploadSub">Formats acceptés : .xlsx, .xls, .csv, .bpmn — glissez ou cliquez
+            <div class="upload-title" id="uploadTitle">Déposer un ou plusieurs fichiers Excel, CSV ou BPMN</div>
+            <div class="upload-sub" id="uploadSub">Formats acceptés : .xlsx, .xls, .csv, .bpmn — plusieurs BPMN possibles
             </div>
           </div>
 
@@ -835,15 +835,14 @@
         <!-- Panel Subprocess Import -->
         <div class="panel" id="panel-sub-import">
           <div class="upload-zone" id="dropZoneSub">
-            <input type="file" id="fileInputSub" accept=".xlsx,.xls,.csv,.bpmn,.xml">
+            <input type="file" id="fileInputSub" accept=".xlsx,.xls,.csv,.bpmn,.xml" multiple>
             <svg viewBox="0 0 24 24">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
-            <div class="upload-title" id="uploadTitleSub">Déposer un fichier Excel, CSV ou BPMN</div>
-            <div class="upload-sub" id="uploadSubSub">Relations de processus : parent et sous-processus — glissez ou
-              cliquez</div>
+            <div class="upload-title" id="uploadTitleSub">Déposer un ou plusieurs fichiers Excel, CSV ou BPMN</div>
+            <div class="upload-sub" id="uploadSubSub">Relations de processus : parent et sous-processus — plusieurs BPMN possibles</div>
           </div>
 
           <div class="mapping-section" id="mappingSectionSub" style="display:none">
@@ -1094,14 +1093,14 @@
         <!-- Panel BPMN Naming Import -->
         <div class="panel" id="panel-bpmn-naming-import">
           <div class="upload-zone" id="dropZoneBpmnNaming">
-            <input type="file" id="fileInputBpmnNaming" accept=".bpmn,.xml">
+            <input type="file" id="fileInputBpmnNaming" accept=".bpmn,.xml" multiple>
             <svg viewBox="0 0 24 24">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
-            <div class="upload-title" id="uploadTitleBpmnNaming">Déposer un fichier BPMN</div>
-            <div class="upload-sub" id="uploadSubBpmnNaming">Formats acceptés : .bpmn, .xml — glissez ou cliquez</div>
+            <div class="upload-title" id="uploadTitleBpmnNaming">Déposer un ou plusieurs fichiers BPMN</div>
+            <div class="upload-sub" id="uploadSubBpmnNaming">Formats acceptés : .bpmn, .xml — plusieurs BPMN possibles</div>
           </div>
 
           <div class="mapping-section" id="bpmnNamingSummarySection"
@@ -1241,7 +1240,8 @@
             <table>
               <thead>
                 <tr>
-                  <th style="width:12%" onclick="sortBpmnResults('type')">Type <span id="sort-bpmn-type"></span></th>
+                  <th style="width:14%">Fichier source</th>
+                  <th style="width:11%" onclick="sortBpmnResults('type')">Type <span id="sort-bpmn-type"></span></th>
                   <th style="width:15%" onclick="sortBpmnResults('id')">ID technique <span id="sort-bpmn-id"></span>
                   </th>
                   <th style="width:20%" onclick="sortBpmnResults('name')">Libellé actuel <span
@@ -3429,6 +3429,7 @@
   <script src="js/db.js"></script>
   <script src="js/rules.js"></script>
   <script src="js/bpmn_rules.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="js/app.js"></script>
   <script src="js/pmg.js"></script>
   <script src="js/roi.js"></script>
