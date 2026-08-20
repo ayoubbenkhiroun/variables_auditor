@@ -9,6 +9,7 @@ let isBPMNMode = false;
 let bpmnRows = [];
 let bpmnXmlDoc = null;
 let bpmnFileName = "";
+let bpmnFiles = []; // Plusieurs BPMN importés : [{name, doc, rows}]
 let currentSort = { key: 'status', dir: 1 };
 let searchVal = '';
 let currentPage = 1;
@@ -191,10 +192,11 @@ async function analyze(){
     date: new Date(),
     count: allRows.length,
     valid: allRows.filter(r=>r.status==='valid').length,
-    label: isBPMNMode ? bpmnFileName : rawFileData.length ? document.getElementById('uploadTitle').textContent : 'Saisie manuelle',
+    label: isBPMNMode ? (bpmnFiles.length > 1 ? `${bpmnFiles.length} fichiers BPMN` : bpmnFileName) : rawFileData.length ? document.getElementById('uploadTitle').textContent : 'Saisie manuelle',
     isBPMNMode: isBPMNMode,
     bpmnXmlText: isBPMNMode && bpmnXmlDoc ? new XMLSerializer().serializeToString(bpmnXmlDoc) : null,
     bpmnFileName: isBPMNMode ? bpmnFileName : null,
+    bpmnFiles: isBPMNMode ? bpmnFiles.map(f => ({ name: f.name, xmlText: new XMLSerializer().serializeToString(f.doc) })) : null,
     allRows: JSON.parse(JSON.stringify(allRows))
   };
 
@@ -1053,6 +1055,20 @@ function switchTab(name){
   const panel = document.getElementById('panel-'+name);
   if(panel) panel.classList.add('active');
 
+  // Gérer l'état actif du menu latéral pour le guide d'utilisation
+  if (name === 'guide') {
+    document.querySelectorAll('.menu-header').forEach(h => {
+      if (h.id === 'btn-mod-guide') {
+        h.classList.add('active');
+      } else if (!h.closest('#group-guide')) {
+        h.classList.remove('active');
+      }
+    });
+  } else {
+    const guideHeader = document.getElementById('btn-mod-guide');
+    if (guideHeader) guideHeader.classList.remove('active');
+  }
+
   // Mise à jour dynamique du titre dans l'en-tête principal
   const titles = {
     'import': 'Importation des données',
@@ -1070,7 +1086,10 @@ function switchTab(name){
     'bpmn-naming-results': 'Rapport d\'Audit de Nommage BPMN',
     'pmg-import': 'Importation du BPMN (PMG)',
     'pmg-dashboard': 'Étude & Gouvernance PMG',
-    'pmg-matrix': 'Matrice des Activités PMG'
+    'pmg-matrix': 'Matrice des Activités PMG',
+    'roi-calculator': 'Calculateur de ROI & Gain de Temps',
+    'roi-config': 'Configuration du Calculateur ROI',
+    'guide': 'Guide d\'utilisation'
   };
   const pageTitleEl = document.getElementById('pageTitle');
   if (pageTitleEl && titles[name]) {
@@ -1143,6 +1162,30 @@ function updatePreview(){
   document.getElementById('countHint').textContent = `${totalVars} variables détectées`;
 }
 
+function handleFiles(files) {
+  const selectedFiles = Array.from(files || []).filter(Boolean);
+  if (!selectedFiles.length) return;
+  const hasBpmn = selectedFiles.some(f => /\.(bpmn|xml)$/i.test(f.name));
+  if (hasBpmn) {
+    const invalid = selectedFiles.filter(f => !/\.(bpmn|xml)$/i.test(f.name));
+    if (invalid.length) { alert("Pour un import multiple, sélectionnez uniquement des fichiers .bpmn ou .xml."); return; }
+    return handleBPMNFiles(selectedFiles);
+  }
+  return handleFile(selectedFiles[0]);
+}
+
+function handleSubprocessFiles(files) {
+  const selectedFiles = Array.from(files || []).filter(Boolean);
+  if (!selectedFiles.length) return;
+  const hasBpmn = selectedFiles.some(f => /\.(bpmn|xml)$/i.test(f.name));
+  if (hasBpmn) {
+    const invalid = selectedFiles.filter(f => !/\.(bpmn|xml)$/i.test(f.name));
+    if (invalid.length) { alert("Pour un import multiple, sélectionnez uniquement des fichiers .bpmn ou .xml."); return; }
+    return handleBPMNSubprocessFiles(selectedFiles);
+  }
+  return handleSubprocessFile(selectedFiles[0]);
+}
+
 function handleFile(file){
   if(!file)return;
   const name = file.name.toLowerCase();
@@ -1192,39 +1235,57 @@ function handleExcelCSVFile(file){
   reader.readAsArrayBuffer(file);
 }
 
-function handleBPMNFile(file){
-  const reader = new FileReader();
-  reader.onload = e => {
-    const xmlText = e.target.result;
-    bpmnFileName = file.name;
+function handleBPMNFile(file) {
+  return handleBPMNFiles([file]);
+}
+
+async function handleBPMNFiles(files) {
+  const selectedFiles = Array.from(files || []).filter(Boolean);
+  if (!selectedFiles.length) return;
+
+  bpmnFiles = [];
+  bpmnRows = [];
+  bpmnXmlDoc = null;
+  bpmnFileName = "";
+  isBPMNMode = true;
+  rawFileData = [];
+  fileHeaders = [];
+
+  const errors = [];
+  for (const file of selectedFiles) {
     try {
+      const xmlText = await file.text();
       const parser = new DOMParser();
-      bpmnXmlDoc = parser.parseFromString(xmlText, "application/xml");
-      
-      const parserError = bpmnXmlDoc.querySelector('parsererror');
-      if (parserError) {
-        throw new Error(parserError.textContent);
-      }
-      
-      bpmnRows = extractBPMNVariables(bpmnXmlDoc);
-      isBPMNMode = true;
-      rawFileData = [];
-      fileHeaders = [];
-      
-      document.getElementById('uploadTitle').textContent = file.name;
-      document.getElementById('uploadSub').textContent = `Fichier BPMN chargé (${bpmnRows.length} variables trouvées)`;
-      document.getElementById('manualInput').value = '';
-      document.getElementById('mappingSection').style.display = 'none';
-      document.getElementById('countHint').textContent = `${bpmnRows.length} variables détectées`;
-      
-      updateBPMNPreview();
-      
-    } catch(err) {
-      console.error("Erreur de lecture BPMN", err);
-      alert("Erreur de parsing XML : " + err.message);
+      const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+      const parserError = xmlDoc.querySelector('parsererror');
+      if (parserError) throw new Error(parserError.textContent || 'XML invalide');
+      const rows = extractBPMNVariables(xmlDoc).map(row => ({ ...row, sourceFile: file.name }));
+      bpmnFiles.push({ name: file.name, doc: xmlDoc, rows });
+      bpmnRows.push(...rows);
+    } catch (err) {
+      console.error(`Erreur de lecture BPMN (${file.name})`, err);
+      errors.push(`${file.name}: ${err.message}`);
     }
-  };
-  reader.readAsText(file);
+  }
+
+  if (!bpmnFiles.length) {
+    isBPMNMode = false;
+    alert("Aucun fichier BPMN valide n'a pu être importé.");
+    return;
+  }
+
+  bpmnXmlDoc = bpmnFiles[0].doc;
+  bpmnFileName = bpmnFiles.length === 1 ? bpmnFiles[0].name : `${bpmnFiles.length} fichiers BPMN`;
+  const uploadTitle = document.getElementById('uploadTitle');
+  const uploadSub = document.getElementById('uploadSub');
+  const countHint = document.getElementById('countHint');
+  if (uploadTitle) uploadTitle.textContent = bpmnFiles.length === 1 ? bpmnFiles[0].name : `${bpmnFiles.length} fichiers BPMN sélectionnés`;
+  if (uploadSub) uploadSub.textContent = `${bpmnFiles.length} fichier${bpmnFiles.length > 1 ? 's' : ''} BPMN chargé${bpmnFiles.length > 1 ? 's' : ''} — ${bpmnRows.length} variables détectées`;
+  document.getElementById('manualInput').value = '';
+  document.getElementById('mappingSection').style.display = 'none';
+  if (countHint) countHint.textContent = `${bpmnFiles.length} BPMN · ${bpmnRows.length} variables détectées`;
+  updateBPMNPreview();
+  if (errors.length) alert(`Certains fichiers n'ont pas pu être importés :\n\n${errors.join('\n')}`);
 }
 
 function updateBPMNPreview(){
@@ -1237,6 +1298,7 @@ function updateBPMNPreview(){
     let details = [];
     if(r.parentProcess) details.push(`Proc: ${r.parentProcess}`);
     if(r.callingProcess) details.push(`Elément: ${r.callingProcess}`);
+    if(r.sourceFile) details.push(`Fichier: ${r.sourceFile}`);
     previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(r.name)}</strong> <span style="color:var(--text-tertiary);font-size:10px">${details.join(' | ')}</span></div>`;
   }
   
@@ -1481,74 +1543,93 @@ function extractBPMNVariables(xmlDoc) {
   return rows;
 }
 
-function downloadCorrectedBPMN() {
-  if (!isBPMNMode || !bpmnXmlDoc) {
+async function downloadCorrectedBPMN() {
+  if (!isBPMNMode || !bpmnFiles.length) {
     alert("Aucun fichier BPMN n'est actuellement chargé.");
     return;
   }
 
-  let tempIdCounter = 1;
-  allRows.forEach(r => {
-    if (r.bpmnMeta && r.bpmnMeta.node) {
-      if (!r.bpmnMeta.node.hasAttribute('data-auditor-temp-id')) {
-        r.bpmnMeta.node.setAttribute('data-auditor-temp-id', 'id_' + tempIdCounter++);
+  const serializer = new XMLSerializer();
+  const outputs = [];
+
+  for (const bpmnFile of bpmnFiles) {
+    const fileRows = allRows.filter(r => r.sourceFile === bpmnFile.name);
+    if (!fileRows.length) continue;
+
+    let tempIdCounter = 1;
+    fileRows.forEach(r => {
+      if (r.bpmnMeta && r.bpmnMeta.node && !r.bpmnMeta.node.hasAttribute('data-auditor-temp-id')) {
+        r.bpmnMeta.node.setAttribute('data-auditor-temp-id', `id_${tempIdCounter++}`);
       }
-    }
-  });
+    });
 
-  const clonedDoc = bpmnXmlDoc.cloneNode(true);
-
-  const nameMap = new Map();
-  allRows.forEach(r => {
-    if (r.status !== 'valid' && r.editedSuggestion && r.editedSuggestion.trim() !== r.name) {
-      nameMap.set(r.name.trim(), r.editedSuggestion.trim());
-    }
-  });
-
-  allRows.forEach(r => {
-    if (!r.bpmnMeta || !r.bpmnMeta.node) return;
-    const tempId = r.bpmnMeta.node.getAttribute('data-auditor-temp-id');
-    const clonedNode = clonedDoc.querySelector(`[data-auditor-temp-id="${tempId}"]`);
-    if (!clonedNode) return;
-
-    const { attr, type } = r.bpmnMeta;
-    if (type === 'attribute') {
-      const newName = nameMap.get(r.name);
-      if (newName) {
-        clonedNode.setAttribute(attr, newName);
+    const clonedDoc = bpmnFile.doc.cloneNode(true);
+    const nameMap = new Map();
+    fileRows.forEach(r => {
+      if (r.status !== 'valid' && r.editedSuggestion && r.editedSuggestion.trim() !== r.name) {
+        nameMap.set(r.name.trim(), r.editedSuggestion.trim());
       }
-    } else if (type === 'expression') {
-      let currentValue = attr ? clonedNode.getAttribute(attr) : clonedNode.textContent;
-      if (currentValue) {
-        let updatedValue = currentValue;
-        nameMap.forEach((newValue, oldValue) => {
-          const escapedOld = oldValue.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-          const regex = new RegExp('\\b' + escapedOld + '\\b', 'g');
-          updatedValue = updatedValue.replace(regex, newValue);
-        });
-        
-        if (attr) {
-          clonedNode.setAttribute(attr, updatedValue);
-        } else {
-          clonedNode.textContent = updatedValue;
+    });
+
+    fileRows.forEach(r => {
+      if (!r.bpmnMeta || !r.bpmnMeta.node) return;
+      const tempId = r.bpmnMeta.node.getAttribute('data-auditor-temp-id');
+      const clonedNode = clonedDoc.querySelector(`[data-auditor-temp-id="${tempId}"]`);
+      if (!clonedNode) return;
+
+      const { attr, type } = r.bpmnMeta;
+      if (type === 'attribute') {
+        const newName = nameMap.get(r.name);
+        if (newName) clonedNode.setAttribute(attr, newName);
+      } else if (type === 'expression') {
+        let currentValue = attr ? clonedNode.getAttribute(attr) : clonedNode.textContent;
+        if (currentValue) {
+          let updatedValue = currentValue;
+          nameMap.forEach((newValue, oldValue) => {
+            const escapedOld = oldValue.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+            updatedValue = updatedValue.replace(new RegExp('\\b' + escapedOld + '\\b', 'g'), newValue);
+          });
+          if (attr) clonedNode.setAttribute(attr, updatedValue);
+          else clonedNode.textContent = updatedValue;
         }
       }
+    });
+
+    fileRows.forEach(r => {
+      if (r.bpmnMeta && r.bpmnMeta.node) r.bpmnMeta.node.removeAttribute('data-auditor-temp-id');
+    });
+    clonedDoc.querySelectorAll('[data-auditor-temp-id]').forEach(n => n.removeAttribute('data-auditor-temp-id'));
+
+    const updatedXmlText = serializer.serializeToString(clonedDoc);
+    const correctedFileName = bpmnFile.name
+      .replace(/\.bpmn$/i, '_corrected.bpmn')
+      .replace(/\.xml$/i, '_corrected.xml');
+    outputs.push({ name: correctedFileName, content: updatedXmlText });
+  }
+
+  if (!outputs.length) {
+    alert("Aucun BPMN corrigé à exporter.");
+    return;
+  }
+
+  if (outputs.length === 1 || !window.JSZip) {
+    outputs.forEach((item, index) => {
+      setTimeout(() => dl(item.content, item.name, 'application/xml'), index * 150);
+    });
+    if (outputs.length > 1 && !window.JSZip) {
+      alert("Les fichiers corrigés seront téléchargés séparément (JSZip n'est pas disponible).");
     }
-  });
+    return;
+  }
 
-  allRows.forEach(r => {
-    if (r.bpmnMeta && r.bpmnMeta.node) {
-      r.bpmnMeta.node.removeAttribute('data-auditor-temp-id');
-    }
-  });
-  const tempNodes = clonedDoc.querySelectorAll('[data-auditor-temp-id]');
-  tempNodes.forEach(n => n.removeAttribute('data-auditor-temp-id'));
-
-  const serializer = new XMLSerializer();
-  const updatedXmlText = serializer.serializeToString(clonedDoc);
-
-  const correctedFileName = bpmnFileName.replace(/\.bpmn$/, '_corrected.bpmn').replace(/\.xml$/, '_corrected.xml');
-  dl(updatedXmlText, correctedFileName, 'application/xml');
+  const zip = new JSZip();
+  outputs.forEach(item => zip.file(item.name, item.content));
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'bpmn_variables_corrected.zip';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 function loadDemo(){
@@ -1587,6 +1668,7 @@ function resetAll(){
   bpmnRows = [];
   bpmnXmlDoc = null;
   bpmnFileName = "";
+  bpmnFiles = [];
   const bpmnBtn = document.getElementById('downloadBpmnBtn');
   if (bpmnBtn) bpmnBtn.style.display = 'none';
 
@@ -1645,8 +1727,9 @@ function resetAll(){
 
 // ---------- Exporters ----------
 function exportCSV(){
-  const header='Variable originale,Statut,Problèmes,Suggestion,Sensibilité,Équipe Propriétaire,Processus Parent,Processus Appelant\n';
+  const header='Fichier source,Variable originale,Statut,Problèmes,Suggestion,Sensibilité,Équipe Propriétaire,Processus Parent,Processus Appelant\n';
   const body=allRows.map(r=>[
+    qq(r.sourceFile || ''),
     qq(r.name),
     qq(r.status==='valid'?'Conforme':r.status==='warn'?'Avertissement':'Non conforme'),
     qq(r.issues.map(i=>i.msg).join('; ')),
@@ -1661,8 +1744,9 @@ function exportCSV(){
 
 function exportExcel(){
   if(!window.XLSX){alert('Bibliothèque XLSX non chargée');return}
-  const data=[['Variable originale','Statut','Problèmes','Suggestion','Sensibilité','Équipe Propriétaire','Processus Parent','Processus Appelant']];
+  const data=[['Fichier source','Variable originale','Statut','Problèmes','Suggestion','Sensibilité','Équipe Propriétaire','Processus Parent','Processus Appelant']];
   allRows.forEach(r=>data.push([
+    r.sourceFile || '',
     r.name,
     r.status==='valid'?'Conforme':r.status==='warn'?'Avertissement':'Non conforme',
     r.issues.map(i=>i.msg).join('; '),
@@ -1674,7 +1758,7 @@ function exportExcel(){
   ]));
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(data);
-  ws['!cols']=[{wch:25},{wch:12},{wch:45},{wch:20},{wch:18},{wch:18},{wch:20},{wch:20}];
+  ws['!cols']=[{wch:30},{wch:25},{wch:12},{wch:45},{wch:20},{wch:18},{wch:18},{wch:20},{wch:20}];
   XLSX.utils.book_append_sheet(wb,ws,'Rapport');
   XLSX.writeFile(wb,'camunda_variables_rapport.xlsx');
 }
@@ -1940,23 +2024,23 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 // ---------- Event Listeners & initialization ----------
 const dz=document.getElementById('dropZone');
 if (document.getElementById('fileInput')) {
-  document.getElementById('fileInput').addEventListener('change',e=>handleFile(e.target.files[0]));
+  document.getElementById('fileInput').addEventListener('change',e=>handleFiles(e.target.files));
 }
 if (dz) {
   dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag')});
   dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
-  dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');handleFile(e.dataTransfer.files[0])});
+  dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');handleFiles(e.dataTransfer.files)});
 }
 
 const dzSub=document.getElementById('dropZoneSub');
 const fileInputSub=document.getElementById('fileInputSub');
 if (fileInputSub) {
-  fileInputSub.addEventListener('change',e=>handleSubprocessFile(e.target.files[0]));
+  fileInputSub.addEventListener('change',e=>handleSubprocessFiles(e.target.files));
 }
 if (dzSub) {
   dzSub.addEventListener('dragover',e=>{e.preventDefault();dzSub.classList.add('drag')});
   dzSub.addEventListener('dragleave',()=>dzSub.classList.remove('drag'));
-  dzSub.addEventListener('drop',e=>{e.preventDefault();dzSub.classList.remove('drag');handleSubprocessFile(e.dataTransfer.files[0])});
+  dzSub.addEventListener('drop',e=>{e.preventDefault();dzSub.classList.remove('drag');handleSubprocessFiles(e.dataTransfer.files)});
 }
 
 renderRules();
@@ -2019,20 +2103,26 @@ window.switchModule = function(moduleName) {
   const btnSubs = document.getElementById('btn-mod-subprocesses');
   const btnBpmn = document.getElementById('btn-mod-bpmn-naming');
   const btnPmg = document.getElementById('btn-mod-pmg');
+  const btnRoi = document.getElementById('btn-mod-roi');
   if (btnVars) btnVars.classList.toggle('active', moduleName === 'variables');
   if (btnSubs) btnSubs.classList.toggle('active', moduleName === 'subprocesses');
   if (btnBpmn) btnBpmn.classList.toggle('active', moduleName === 'bpmn-naming');
   if (btnPmg) btnPmg.classList.toggle('active', moduleName === 'pmg');
+  if (btnRoi) btnRoi.classList.toggle('active', moduleName === 'roi');
+  const guideHeader = document.getElementById('btn-mod-guide');
+  if (guideHeader) guideHeader.classList.remove('active');
 
   // Mettre à jour l'expansion des groupes de menu
   const groupVars = document.getElementById('group-variables');
   const groupSubs = document.getElementById('group-subprocesses');
   const groupBpmn = document.getElementById('group-bpmn-naming');
   const groupPmg = document.getElementById('group-pmg');
+  const groupRoi = document.getElementById('group-roi');
   if (groupVars) groupVars.classList.toggle('expanded', moduleName === 'variables');
   if (groupSubs) groupSubs.classList.toggle('expanded', moduleName === 'subprocesses');
   if (groupBpmn) groupBpmn.classList.toggle('expanded', moduleName === 'bpmn-naming');
   if (groupPmg) groupPmg.classList.toggle('expanded', moduleName === 'pmg');
+  if (groupRoi) groupRoi.classList.toggle('expanded', moduleName === 'roi');
 
   // Onglets variables
   const varTabIds = ['import', 'config', 'resultsTab', 'dashTab', 'graphTab', 'rankTab', 'histTab'];
@@ -2099,10 +2189,16 @@ window.switchModule = function(moduleName) {
           el.style.display = '';
         }
       } else {
-        el.style.display = '';
+        el.style.display = 'none'; // Fixed bug from original code where this was ''
       }
-    } else {
-      el.style.display = 'none';
+    }
+  });
+
+  const roiTabIds = ['roiCalcTab', 'roiConfigTab'];
+  roiTabIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.display = moduleName === 'roi' ? '' : 'none';
     }
   });
 
@@ -2118,6 +2214,11 @@ window.switchModule = function(moduleName) {
     switchTab('pmg-import');
     if (typeof initPmgModule === 'function') {
       initPmgModule();
+    }
+  } else if (moduleName === 'roi') {
+    switchTab('roi-calculator');
+    if (typeof initRoiModule === 'function') {
+      initRoiModule();
     }
   }
 }
@@ -2234,23 +2335,27 @@ window.updateSubPreview = function() {
 }
 
 function handleBPMNSubprocessFile(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    const xmlText = e.target.result;
+  return handleBPMNSubprocessFiles([file]);
+}
+
+async function handleBPMNSubprocessFiles(files) {
+  const selectedFiles = Array.from(files || []).filter(Boolean);
+  if (!selectedFiles.length) return;
+  rawSubprocessFileData = [];
+  subprocessFileHeaders = [];
+  allSubprocessRows = [];
+  const errors = [];
+
+  for (const file of selectedFiles) {
     try {
+      const xmlText = await file.text();
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(xmlText, "application/xml");
-      
       const parserError = xmlDoc.querySelector('parsererror');
-      if (parserError) {
-        throw new Error(parserError.textContent);
-      }
-      
-      // Extraire les Call Activities
+      if (parserError) throw new Error(parserError.textContent || 'XML invalide');
       const relations = [];
       const allElements = xmlDoc.getElementsByTagName('*');
       let rowId = 1;
-      
       function getParentProcessInfoLocal(node) {
         let parent = node.parentNode;
         while (parent) {
@@ -2264,7 +2369,6 @@ function handleBPMNSubprocessFile(file) {
         }
         return 'Processus inconnu';
       }
-
       for (let i = 0; i < allElements.length; i++) {
         const el = allElements[i];
         const localName = el.localName ? el.localName.toLowerCase() : '';
@@ -2272,45 +2376,32 @@ function handleBPMNSubprocessFile(file) {
           const calledElement = el.getAttribute('calledElement') || '';
           const activityId = el.getAttribute('id') || '';
           const activityName = el.getAttribute('name') || '';
-          const parentProcess = getParentProcessInfoLocal(el);
-          
-          relations.push({
-            parentProcess: parentProcess,
-            subprocess: calledElement || '(Sous-processus non défini)',
-            elementId: activityName ? `${activityName} (${activityId})` : activityId,
-            row: rowId++
-          });
+          relations.push({ parentProcess: getParentProcessInfoLocal(el), subprocess: calledElement || '(Sous-processus non défini)', elementId: activityName ? `${activityName} (${activityId})` : activityId, row: rowId++, sourceFile: file.name });
         }
       }
-
-      rawSubprocessFileData = [];
-      subprocessFileHeaders = [];
-      allSubprocessRows = relations.map(r => ({
-        ...r,
-        status: r.subprocess === '(Sous-processus non défini)' ? 'invalid' : 'valid',
-        issues: r.subprocess === '(Sous-processus non défini)' ? ['Sous-processus non défini (appel vide)'] : []
-      }));
-
-      document.getElementById('uploadTitleSub').textContent = file.name;
-      document.getElementById('uploadSubSub').textContent = `Fichier BPMN chargé (${allSubprocessRows.length} Call Activities trouvées)`;
-      document.getElementById('manualInputSub').value = '';
-      document.getElementById('mappingSectionSub').style.display = 'none';
-      document.getElementById('countHintSub').textContent = `${allSubprocessRows.length} relations détectées`;
-
-      let previewHTML = '';
-      const count = Math.min(allSubprocessRows.length, 5);
-      for(let i=0; i<count; i++){
-        const r = allSubprocessRows[i];
-        previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(r.parentProcess)}</strong> ➔ <strong style="color:#10b981">${esc(r.subprocess)}</strong> <span style="color:var(--text-tertiary);font-size:10px">(${esc(r.elementId)})</span></div>`;
-      }
-      document.getElementById('previewBoxSub').innerHTML = previewHTML || '<span style="color:var(--text-tertiary)">Aucun Call Activity trouvé...</span>';
-
-    } catch(err) {
-      console.error("Erreur de lecture BPMN", err);
-      alert("Erreur de parsing XML : " + err.message);
+      allSubprocessRows.push(...relations.map(r => ({ ...r, status: r.subprocess === '(Sous-processus non défini)' ? 'invalid' : 'valid', issues: r.subprocess === '(Sous-processus non défini)' ? ['Sous-processus non défini (appel vide)'] : [] })));
+    } catch (err) {
+      console.error(`Erreur de lecture BPMN sous-processus (${file.name})`, err);
+      errors.push(`${file.name}: ${err.message}`);
     }
-  };
-  reader.readAsText(file);
+  }
+
+  const uploadTitle = document.getElementById('uploadTitleSub');
+  const uploadSub = document.getElementById('uploadSubSub');
+  const countHint = document.getElementById('countHintSub');
+  if (uploadTitle) uploadTitle.textContent = selectedFiles.length === 1 ? selectedFiles[0].name : `${selectedFiles.length} fichiers BPMN sélectionnés`;
+  if (uploadSub) uploadSub.textContent = `${selectedFiles.length} fichier${selectedFiles.length > 1 ? 's' : ''} BPMN chargé${selectedFiles.length > 1 ? 's' : ''} — ${allSubprocessRows.length} Call Activities trouvées`;
+  document.getElementById('manualInputSub').value = '';
+  document.getElementById('mappingSectionSub').style.display = 'none';
+  if (countHint) countHint.textContent = `${selectedFiles.length} BPMN · ${allSubprocessRows.length} relations détectées`;
+  let previewHTML = '';
+  const count = Math.min(allSubprocessRows.length, 10);
+  for (let i = 0; i < count; i++) {
+    const r = allSubprocessRows[i];
+    previewHTML += `<div style="margin-bottom:4px"><strong style="color:var(--brand-primary)">${esc(r.parentProcess)}</strong> ➔ <strong style="color:#10b981">${esc(r.subprocess)}</strong> <span style="color:var(--text-tertiary);font-size:10px">(${esc(r.elementId)}) — ${esc(r.sourceFile || '')}</span></div>`;
+  }
+  document.getElementById('previewBoxSub').innerHTML = previewHTML || '<span style="color:var(--text-tertiary)">Aucun Call Activity trouvé...</span>';
+  if (errors.length) alert(`Certains fichiers n'ont pas pu être importés :\n\n${errors.join('\n')}`);
 }
 
 window.analyzeSubprocesses = function() {
@@ -2585,6 +2676,7 @@ window.renderSubprocessMap = function() {
   if (!container) return;
 
   const showLoopsOnly = document.getElementById('subGraphLoopsOnly')?.checked || false;
+  const showCommonOnly = document.getElementById('subGraphCommonOnly')?.checked || false;
   const parentFilters = getSelectedCheckboxValues('subParentList');
   const childFilters = getSelectedCheckboxValues('subChildList');
 
@@ -2596,6 +2688,19 @@ window.renderSubprocessMap = function() {
   const nodesMap = new Map();
   const edges = [];
 
+  // Précalculer le nombre de parents par sous-processus
+  const subToParents = {};
+  allSubprocessRows.forEach(r => {
+    const child = r.subprocess;
+    const parent = r.parentProcess;
+    if (child && child !== '(Sous-processus non défini)' && parent) {
+      if (!subToParents[child]) {
+        subToParents[child] = new Set();
+      }
+      subToParents[child].add(parent);
+    }
+  });
+
   allSubprocessRows.forEach(r => {
     if (showLoopsOnly && !r.inLoop) return;
 
@@ -2603,6 +2708,12 @@ window.renderSubprocessMap = function() {
     const child = r.subprocess;
 
     if (!parent) return;
+
+    if (showCommonOnly) {
+      if (!child || child === '(Sous-processus non défini)' || !subToParents[child] || subToParents[child].size <= 1) {
+        return;
+      }
+    }
 
     if (parentFilters.length > 0 && !parentFilters.includes(parent)) return;
     if (childFilters.length > 0 && child && !childFilters.includes(child)) return;
@@ -2650,8 +2761,13 @@ window.renderSubprocessMap = function() {
 
   const nodes = Array.from(nodesMap.values());
 
+  const kpiGrid = document.getElementById('subMapKpiGrid');
+  const sidebarContent = document.getElementById('subMapAnalysisContent');
+
   if (nodes.length === 0) {
     container.innerHTML = '<div class="empty-state" style="padding:4rem; height: 100%; display: flex; flex-direction: column; justify-content: center;"><div class="empty-icon">⚯</div>Aucune relation à cartographier.</div>';
+    if (kpiGrid) kpiGrid.style.display = 'none';
+    if (sidebarContent) sidebarContent.innerHTML = '<p style="font-style: italic; color: var(--text-tertiary);">Aucune donnée disponible avec les filtres actuels.</p>';
     return;
   }
 
@@ -2661,6 +2777,131 @@ window.renderSubprocessMap = function() {
     const key = e.from + '_' + e.to;
     if(!edgeSet.has(key)) { edgeSet.add(key); uniqueEdges.push(e); }
   });
+
+  // Mettre à jour les KPIs
+  const visibleParents = nodes.filter(n => n.group === 'process').length;
+  const visibleChildren = nodes.filter(n => n.group === 'subprocess').length;
+  const visibleRelations = uniqueEdges.length;
+  const reusabilityRate = visibleChildren > 0 ? (visibleRelations / visibleChildren).toFixed(1) : '0.0';
+
+  if (kpiGrid) {
+    kpiGrid.style.display = 'grid';
+    document.getElementById('kpi-sub-map-parents').textContent = visibleParents;
+    document.getElementById('kpi-sub-map-children').textContent = visibleChildren;
+    document.getElementById('kpi-sub-map-reusability').textContent = reusabilityRate;
+    document.getElementById('kpi-sub-map-relations').textContent = visibleRelations;
+  }
+
+  // Générer les analyses détaillées
+  if (sidebarContent) {
+    let analysisHtml = '';
+
+    // Groupement enfant -> parents
+    const childToParentsMap = {};
+    // Groupement parent -> enfants
+    const parentToChildrenMap = {};
+    let visibleLoops = 0;
+
+    uniqueEdges.forEach(e => {
+      const parentName = nodesMap.get(e.from)?.label;
+      const childName = nodesMap.get(e.to)?.label;
+      if (parentName && childName) {
+        if (!childToParentsMap[childName]) childToParentsMap[childName] = [];
+        childToParentsMap[childName].push(parentName);
+
+        if (!parentToChildrenMap[parentName]) parentToChildrenMap[parentName] = [];
+        parentToChildrenMap[parentName].push(childName);
+        
+        const edgeRow = allSubprocessRows.find(r => r.parentProcess === parentName && r.subprocess === childName);
+        if (edgeRow && edgeRow.inLoop) {
+          visibleLoops++;
+        }
+      }
+    });
+
+    // 1. Alerte boucles circulaires
+    if (visibleLoops > 0) {
+      analysisHtml += `
+        <div style="background:var(--err-light); border:1px solid var(--err); color:var(--text-primary); padding:10px; border-radius:var(--border-radius-md); margin-bottom:10px;">
+          <span style="font-weight:600; color:var(--err); display:flex; align-items:center; gap:4px;">⚠️ Dépendances Circulaires</span>
+          <p style="margin-top:4px; font-size:11px; line-height:1.4;">Il y a <strong>${visibleLoops}</strong> liaison(s) impliquée(s) dans une boucle infinie de dépendance dans la vue actuelle.</p>
+        </div>
+      `;
+    }
+
+    // 2. Sous-processus partagés
+    const sortedChildren = Object.entries(childToParentsMap)
+      .sort((a, b) => b[1].length - a[1].length);
+
+    analysisHtml += `
+      <div style="margin-bottom: 10px;">
+        <h5 style="font-size:12px; font-weight:600; color:var(--text-primary); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:4px;">
+          <span>🔗 Réutilisation (Top Partagés)</span>
+          <span style="font-size:10px; color:var(--text-tertiary); font-weight:normal;">Total: ${sortedChildren.filter(c => c[1].length > 1).length}</span>
+        </h5>
+    `;
+
+    if (sortedChildren.length > 0) {
+      analysisHtml += '<div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; padding-right:2px;">';
+      sortedChildren.slice(0, 5).forEach(([name, parents]) => {
+        const isShared = parents.length > 1;
+        analysisHtml += `
+          <div style="background:var(--bg-card-hover); border:1px solid var(--border-color); padding:8px; border-radius:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+              <span style="font-weight:600; color:${isShared ? 'var(--brand-primary)' : 'var(--text-primary)'}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(name)}">${esc(name)}</span>
+              <span style="font-size:9px; background:${isShared ? 'var(--brand-light)' : 'var(--border-color)'}; color:${isShared ? 'var(--brand-primary)' : 'var(--text-secondary)'}; padding:1px 5px; border-radius:10px; font-weight:bold; flex-shrink:0;">
+                ${parents.length} parent${parents.length > 1 ? 's' : ''}
+              </span>
+            </div>
+            <div style="font-size:10px; color:var(--text-tertiary); overflow:hidden; text-overflow:ellipsis; display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+              ${parents.map(p => `<span style="background:var(--bg-card); border:1px solid var(--border-color); padding:1px 4px; border-radius:3px; font-size:9px;">${esc(p)}</span>`).join('')}
+            </div>
+          </div>
+        `;
+      });
+      analysisHtml += '</div>';
+    } else {
+      analysisHtml += '<p style="font-style:italic; font-size:11px; color:var(--text-tertiary);">Aucun sous-processus visible.</p>';
+    }
+    analysisHtml += '</div>';
+
+    // 3. Processus parents complexes
+    const sortedParents = Object.entries(parentToChildrenMap)
+      .sort((a, b) => b[1].length - a[1].length);
+
+    analysisHtml += `
+      <div>
+        <h5 style="font-size:12px; font-weight:600; color:var(--text-primary); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:4px;">
+          <span>⚙️ Complexité (Top Appels)</span>
+          <span style="font-size:10px; color:var(--text-tertiary); font-weight:normal;">Total: ${sortedParents.length}</span>
+        </h5>
+    `;
+
+    if (sortedParents.length > 0) {
+      analysisHtml += '<div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; padding-right:2px;">';
+      sortedParents.slice(0, 5).forEach(([name, children]) => {
+        analysisHtml += `
+          <div style="background:var(--bg-card-hover); border:1px solid var(--border-color); padding:8px; border-radius:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+              <span style="font-weight:600; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(name)}">${esc(name)}</span>
+              <span style="font-size:9px; background:var(--info-light); color:var(--info); padding:1px 5px; border-radius:10px; font-weight:bold; flex-shrink:0;">
+                ${children.length} appel${children.length > 1 ? 's' : ''}
+              </span>
+            </div>
+            <div style="font-size:10px; color:var(--text-tertiary); overflow:hidden; text-overflow:ellipsis; display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+              ${children.map(c => `<span style="background:var(--bg-card); border:1px solid var(--border-color); padding:1px 4px; border-radius:3px; font-size:9px;">${esc(c)}</span>`).join('')}
+            </div>
+          </div>
+        `;
+      });
+      analysisHtml += '</div>';
+    } else {
+      analysisHtml += '<p style="font-style:italic; font-size:11px; color:var(--text-tertiary);">Aucun processus parent visible.</p>';
+    }
+    analysisHtml += '</div>';
+
+    sidebarContent.innerHTML = analysisHtml;
+  }
 
   const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(uniqueEdges) };
 
@@ -2733,6 +2974,8 @@ window.resetSubGraphFilters = function() {
   }
   const checkLoop = document.getElementById('subGraphLoopsOnly');
   if (checkLoop) checkLoop.checked = false;
+  const checkCommon = document.getElementById('subGraphCommonOnly');
+  if (checkCommon) checkCommon.checked = false;
   
   const pInput = document.getElementById('searchSubParentInput');
   const cInput = document.getElementById('searchSubChildInput');
@@ -2832,6 +3075,7 @@ window.bpmnNamingElements = [];
 window.filteredBpmnNamingElements = [];
 window.bpmnNamingXmlDoc = null;
 window.bpmnNamingFileName = "";
+window.bpmnNamingFiles = []; // Plusieurs BPMN importés : [{name, doc, elements}]
 window.bpmnNamingFilter = 'all';
 window.bpmnNamingSearch = '';
 window.bpmnNamingSort = { key: 'status', dir: 1 };
@@ -2877,34 +3121,69 @@ window.toggleBpmnRuleEnabled = function(idx, isChecked) {
 let bpmnListenersAttached = false;
 function setupBpmnNamingEventListeners() {
   if (bpmnListenersAttached) return;
-  
   const dz = document.getElementById('dropZoneBpmnNaming');
   const input = document.getElementById('fileInputBpmnNaming');
-  
   if (input) {
     input.addEventListener('change', e => {
-      if (e.target.files.length > 0) {
-        handleBpmnNamingFile(e.target.files[0]);
-      }
+      if (e.target.files.length > 0) handleBpmnNamingFiles(e.target.files);
     });
   }
-  
   if (dz) {
-    dz.addEventListener('dragover', e => {
-      e.preventDefault();
-      dz.classList.add('drag');
-    });
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
     dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
     dz.addEventListener('drop', e => {
       e.preventDefault();
       dz.classList.remove('drag');
-      if (e.dataTransfer.files.length > 0) {
-        handleBpmnNamingFile(e.dataTransfer.files[0]);
-      }
+      if (e.dataTransfer.files.length > 0) handleBpmnNamingFiles(e.dataTransfer.files);
     });
   }
-  
   bpmnListenersAttached = true;
+}
+
+async function handleBpmnNamingFiles(files) {
+  const selectedFiles = Array.from(files || []).filter(Boolean);
+  if (!selectedFiles.length) return;
+
+  bpmnNamingFiles = [];
+  bpmnNamingElements = [];
+  bpmnNamingXmlDoc = null;
+  bpmnNamingFileName = '';
+  const errors = [];
+
+  for (const file of selectedFiles) {
+    try {
+      const xmlText = await file.text();
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+      const parserError = xmlDoc.querySelector('parsererror');
+      if (parserError) throw new Error(parserError.textContent || 'XML invalide');
+      const elements = auditBpmnXmlDoc(xmlDoc).map(el => ({ ...el, sourceFile: file.name }));
+      bpmnNamingFiles.push({ name: file.name, doc: xmlDoc, elements });
+      bpmnNamingElements.push(...elements);
+    } catch (err) {
+      console.error(`Erreur parsing BPMN pour nommage (${file.name})`, err);
+      errors.push(`${file.name}: ${err.message}`);
+    }
+  }
+
+  if (!bpmnNamingFiles.length) {
+    alert("Aucun fichier BPMN valide n'a pu être importé.");
+    return;
+  }
+
+  bpmnNamingXmlDoc = bpmnNamingFiles[0].doc;
+  bpmnNamingFileName = bpmnNamingFiles.length === 1 ? bpmnNamingFiles[0].name : `${bpmnNamingFiles.length} fichiers BPMN`;
+  const btn = document.getElementById('analyzeBpmnNamingBtn');
+  if (btn) btn.removeAttribute('disabled');
+  document.getElementById('uploadTitleBpmnNaming').textContent = bpmnNamingFiles.length === 1 ? bpmnNamingFiles[0].name : `${bpmnNamingFiles.length} fichiers BPMN sélectionnés`;
+  document.getElementById('uploadSubBpmnNaming').textContent = `${bpmnNamingFiles.length} fichier${bpmnNamingFiles.length > 1 ? 's' : ''} BPMN chargé${bpmnNamingFiles.length > 1 ? 's' : ''} (${bpmnNamingElements.length} éléments identifiés)`;
+  updateBpmnNamingSummary();
+  updateBpmnNamingPreview();
+  if (errors.length) alert(`Certains fichiers n'ont pas pu être importés :\n\n${errors.join('\n')}`);
+}
+
+function handleBpmnNamingFile(file) {
+  return handleBpmnNamingFiles([file]);
 }
 
 // Read the BPMN file
@@ -2994,6 +3273,7 @@ function updateBpmnNamingPreview() {
       <span class="badge-bpmn type-${el.type}">${esc(el.typeLabel)}</span>
       <strong style="color:var(--text-primary); font-size:11px;">${esc(el.id)}</strong>
       <span style="color:var(--text-secondary); font-size:11px;">: "${esc(el.name || '[Sans nom]')}"</span>
+      <span style="color:var(--text-tertiary); font-size:10px;"> — ${esc(el.sourceFile || '')}</span>
     </div>`;
   }
   
@@ -3026,8 +3306,12 @@ window.analyzeBpmnNaming = async function() {
   // Wait 2 seconds (simulated loader)
   await new Promise(resolve => setTimeout(resolve, 2000));
   
-  // Re-audit elements based on current rules selection
-  bpmnNamingElements = auditBpmnXmlDoc(bpmnNamingXmlDoc);
+  // Re-audit tous les BPMN importés avec les règles courantes
+  bpmnNamingElements = [];
+  bpmnNamingFiles.forEach(file => {
+    file.elements = auditBpmnXmlDoc(file.doc).map(el => ({ ...el, sourceFile: file.name }));
+    bpmnNamingElements.push(...file.elements);
+  });
   
   // Reset pagination/filters
   bpmnNamingFilter = 'all';
@@ -3244,6 +3528,7 @@ function renderBpmnNamingTable() {
       
     return `
       <tr>
+        <td><span style="font-size:11px; color:var(--text-secondary);">${esc(r.sourceFile || '')}</span></td>
         <td><span class="badge-bpmn type-${r.type}">${esc(r.typeLabel)}</span></td>
         <td><span class="mono" style="font-weight:600; font-size:11px;">${esc(r.id)}</span></td>
         <td><span style="font-size:12px;">${esc(r.name || '[Sans nom]')}</span></td>
@@ -3466,8 +3751,9 @@ window.saveBpmnRuleForm = function(e) {
 
 window.exportBpmnCSV = function() {
   if (!bpmnNamingElements.length) { alert("Le rapport est vide."); return; }
-  const header = 'Type,ID technique,Libellé actuel,Statut,Problèmes,Suggestion\n';
+  const header = 'Fichier source,Type,ID technique,Libellé actuel,Statut,Problèmes,Suggestion\n';
   const body = bpmnNamingElements.map(r => [
+    qq(r.sourceFile || ''),
     qq(r.typeLabel),
     qq(r.id),
     qq(r.name || ''),
@@ -3482,8 +3768,9 @@ window.exportBpmnExcel = function() {
   if (!window.XLSX) { alert('Bibliothèque XLSX non chargée'); return; }
   if (!bpmnNamingElements.length) { alert("Le rapport est vide."); return; }
   
-  const data = [['Type d\'élément', 'ID technique', 'Libellé actuel', 'Statut', 'Problèmes', 'Suggestion corrective']];
+  const data = [['Fichier source', 'Type d\'élément', 'ID technique', 'Libellé actuel', 'Statut', 'Problèmes', 'Suggestion corrective']];
   bpmnNamingElements.forEach(r => data.push([
+    r.sourceFile || '',
     r.typeLabel,
     r.id,
     r.name || '',
@@ -3494,28 +3781,44 @@ window.exportBpmnExcel = function() {
   
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(data);
-  ws['!cols'] = [{ wch: 18 }, { wch: 22 }, { wch: 25 }, { wch: 15 }, { wch: 45 }, { wch: 25 }];
+  ws['!cols'] = [{ wch: 30 }, { wch: 18 }, { wch: 22 }, { wch: 25 }, { wch: 15 }, { wch: 45 }, { wch: 25 }];
   XLSX.utils.book_append_sheet(wb, ws, 'Audit Nommage');
   XLSX.writeFile(wb, 'bpmn_naming_audit_rapport.xlsx');
 };
 
-window.downloadCorrectedBpmnFile = function() {
-  if (!bpmnNamingXmlDoc) {
+window.downloadCorrectedBpmnFile = async function() {
+  if (!bpmnNamingFiles.length) {
     alert("Aucun fichier BPMN n'est actuellement chargé.");
     return;
   }
-  
-  // Clone doc
-  const clonedDoc = bpmnNamingXmlDoc.cloneNode(true);
-  
-  // Apply naming corrections inside XML nodes
-  const updatedXmlText = generateCorrectedBpmnXml(clonedDoc, bpmnNamingElements);
-  
-  const correctedFileName = bpmnNamingFileName
-    .replace(/\.bpmn$/, '_naming_corrected.bpmn')
-    .replace(/\.xml$/, '_naming_corrected.xml');
-    
-  dl(updatedXmlText, correctedFileName, 'application/xml');
+
+  const serializer = new XMLSerializer();
+  const outputs = [];
+
+  for (const bpmnFile of bpmnNamingFiles) {
+    const fileElements = bpmnNamingElements.filter(el => el.sourceFile === bpmnFile.name);
+    const clonedDoc = bpmnFile.doc.cloneNode(true);
+    const updatedXmlText = generateCorrectedBpmnXml(clonedDoc, fileElements);
+    const correctedFileName = bpmnFile.name
+      .replace(/\.bpmn$/i, '_naming_corrected.bpmn')
+      .replace(/\.xml$/i, '_naming_corrected.xml');
+    outputs.push({ name: correctedFileName, content: serializer.serializeToString(clonedDoc) || updatedXmlText });
+  }
+
+  if (outputs.length === 1 || !window.JSZip) {
+    outputs.forEach((item, index) => setTimeout(() => dl(item.content, item.name, 'application/xml'), index * 150));
+    if (outputs.length > 1 && !window.JSZip) alert("Les fichiers corrigés seront téléchargés séparément (JSZip n'est pas disponible).");
+    return;
+  }
+
+  const zip = new JSZip();
+  outputs.forEach(item => zip.file(item.name, item.content));
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'bpmn_naming_corrected.zip';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
 
 
