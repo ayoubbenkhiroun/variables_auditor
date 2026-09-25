@@ -1,0 +1,1323 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AuditFlow Pro — Présentation Exécutive & Synthèse Décisionnelle</title>
+  <link rel="icon" type="image/png" href="img/loading.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fira+Code:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <style>
+    :root {
+      --bg-dark: #f1f5f9;
+      --bg-surface: #ffffff;
+      --bg-card: #ffffff;
+      --border-color: #e2e8f0;
+      
+      --paprika-orange: #ea5b0c;
+      --paprika-orange-light: #c2410c;
+      --paprika-orange-glow: rgba(234, 91, 12, 0.15);
+      
+      --bouygues-blue: #003882;
+      --bouygues-blue-dark: #00224f;
+      --bouygues-cyan: #009fe3;
+      --accent-green: #059669;
+      --accent-purple: #7c3aed;
+      --accent-amber: #d97706;
+      --accent-rose: #e11d48;
+      
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-dim: #94a3b8;
+      
+      --slide-width: 1280px;
+      --slide-height: 720px;
+      --slide-ratio: 16 / 9;
+      --font-heading: 'Outfit', sans-serif;
+      --font-body: 'Plus Jakarta Sans', sans-serif;
+      --font-code: 'Fira Code', monospace;
+      --transition-speed: 0.4s;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: var(--font-body);
+      min-height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      background-image: 
+        radial-gradient(circle at 10% 20%, rgba(0, 56, 130, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(234, 91, 12, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 50% 50%, rgba(241, 245, 249, 0.6) 0%, transparent 100%);
+    }
+
+    /* Top presentation toolbar */
+    .pres-header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      z-index: 100;
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo-small {
+      height: 32px;
+      width: auto;
+      object-fit: contain;
+    }
+
+    .brand-divider {
+      width: 1px;
+      height: 20px;
+      background: var(--border-color);
+    }
+
+    .brand-title-badge {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--paprika-orange);
+      background: rgba(234, 91, 12, 0.08);
+      border: 1px solid rgba(234, 91, 12, 0.2);
+      padding: 4px 10px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-tool {
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      text-decoration: none;
+    }
+
+    .btn-tool:hover {
+      color: var(--paprika-orange);
+      border-color: var(--paprika-orange);
+      background: #fff7ed;
+    }
+
+    .btn-tool.active {
+      background: var(--paprika-orange);
+      color: white;
+      border-color: var(--paprika-orange);
+    }
+
+    /* Presentation Canvas Stage */
+    .pres-viewport {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 70px 24px 70px 24px;
+    }
+
+    .slide-deck {
+      position: relative;
+      width: var(--slide-width);
+      height: var(--slide-height);
+      max-width: 95vw;
+      max-height: 82vh;
+      aspect-ratio: var(--slide-ratio);
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      box-shadow: 0 20px 50px -10px rgba(15, 23, 42, 0.12), 0 0 30px rgba(234, 91, 12, 0.05);
+      overflow: hidden;
+      display: flex;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      padding: 44px 52px;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateX(40px) scale(0.98);
+      transition: opacity var(--transition-speed) ease, transform var(--transition-speed) cubic-bezier(0.16, 1, 0.3, 1), visibility var(--transition-speed);
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+      overflow: hidden;
+    }
+
+    .slide.active {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(0) scale(1);
+      z-index: 2;
+    }
+
+    .slide.prev {
+      transform: translateX(-40px) scale(0.98);
+    }
+
+    /* Slide Header */
+    .slide-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 22px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .slide-meta-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--paprika-orange);
+      background: rgba(234, 91, 12, 0.08);
+      border: 1px solid rgba(234, 91, 12, 0.2);
+      padding: 4px 10px;
+      border-radius: 100px;
+      margin-bottom: 6px;
+    }
+
+    .slide-title {
+      font-family: var(--font-heading);
+      font-size: 2.1rem;
+      font-weight: 800;
+      line-height: 1.15;
+      background: linear-gradient(135deg, #003882 0%, #0f172a 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .slide-subtitle {
+      font-size: 0.98rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      font-weight: 500;
+    }
+
+    .slide-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Slide 1 : Hero Cover */
+    .hero-container {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 36px;
+      align-items: center;
+      height: 100%;
+    }
+
+    .hero-badge-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .hero-badge {
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: rgba(0, 56, 130, 0.08);
+      color: var(--bouygues-blue);
+      border: 1px solid rgba(0, 56, 130, 0.2);
+    }
+
+    .hero-title {
+      font-family: var(--font-heading);
+      font-size: 3rem;
+      font-weight: 900;
+      line-height: 1.08;
+      margin-bottom: 14px;
+      color: var(--bouygues-blue);
+    }
+
+    .hero-title span {
+      background: linear-gradient(135deg, var(--paprika-orange) 0%, #d97706 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-tagline {
+      font-size: 1.12rem;
+      line-height: 1.5;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+    }
+
+    .hero-highlights-box {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .hero-hl-item {
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 12px 14px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+    }
+
+    .hero-hl-num {
+      font-family: var(--font-heading);
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: var(--paprika-orange);
+      line-height: 1;
+    }
+
+    .hero-hl-lbl {
+      font-size: 0.76rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .hero-visual-card {
+      background: linear-gradient(135deg, rgba(0, 56, 130, 0.04) 0%, rgba(234, 91, 12, 0.06) 100%);
+      border: 1px solid rgba(0, 56, 130, 0.15);
+      border-radius: 20px;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 10px 30px rgba(0, 56, 130, 0.06);
+    }
+
+    .hero-visual-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .hero-mascot-img {
+      width: 64px;
+      height: 64px;
+      object-fit: contain;
+      filter: drop-shadow(0 4px 10px rgba(234, 91, 12, 0.3));
+    }
+
+    /* Grid Layouts for Executive Slides */
+    .grid-2col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      height: 100%;
+    }
+
+    .grid-3col {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      height: 100%;
+    }
+
+    .grid-4kpi {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    /* Cards */
+    .card {
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 20px 22px;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+      display: flex;
+      flex-direction: column;
+      transition: all 0.2s ease;
+    }
+
+    .card:hover {
+      border-color: rgba(0, 56, 130, 0.3);
+      box-shadow: 0 8px 24px rgba(0, 56, 130, 0.07);
+      transform: translateY(-2px);
+    }
+
+    .card.highlight-orange {
+      border-top: 4px solid var(--paprika-orange);
+      background: linear-gradient(180deg, rgba(234, 91, 12, 0.03) 0%, #ffffff 40%);
+    }
+
+    .card.highlight-blue {
+      border-top: 4px solid var(--bouygues-blue);
+      background: linear-gradient(180deg, rgba(0, 56, 130, 0.03) 0%, #ffffff 40%);
+    }
+
+    .card.highlight-green {
+      border-top: 4px solid var(--accent-green);
+      background: linear-gradient(180deg, rgba(5, 150, 105, 0.03) 0%, #ffffff 40%);
+    }
+
+    .card-icon-circle {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      margin-bottom: 12px;
+    }
+
+    .icon-blue { background: rgba(0, 56, 130, 0.1); color: var(--bouygues-blue); }
+    .icon-orange { background: rgba(234, 91, 12, 0.1); color: var(--paprika-orange); }
+    .icon-green { background: rgba(5, 150, 105, 0.1); color: var(--accent-green); }
+    .icon-purple { background: rgba(124, 58, 237, 0.1); color: var(--accent-purple); }
+
+    .card-title {
+      font-family: var(--font-heading);
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--bouygues-blue);
+      margin-bottom: 8px;
+    }
+
+    .card-text {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .card-stat {
+      font-family: var(--font-heading);
+      font-size: 2.2rem;
+      font-weight: 900;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .stat-green { color: var(--accent-green); }
+    .stat-blue { color: var(--bouygues-blue); }
+    .stat-orange { color: var(--paprika-orange); }
+
+    /* Comparison Table / Metric Rows */
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      background: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+    }
+
+    .compare-table th {
+      background: #f8fafc;
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .compare-table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--text-main);
+    }
+
+    .compare-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .tag-before {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: #fee2e2;
+      color: #991b1b;
+      font-weight: 700;
+      font-size: 0.78rem;
+    }
+
+    .tag-after {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: #dcfce7;
+      color: #166534;
+      font-weight: 700;
+      font-size: 0.78rem;
+    }
+
+    /* Executive Pillars */
+    .pillar-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-top: 10px;
+    }
+
+    .pillar-box {
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 18px;
+      border-left: 5px solid var(--bouygues-blue);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+    }
+
+    .pillar-box.orange { border-left-color: var(--paprika-orange); }
+    .pillar-box.green { border-left-color: var(--accent-green); }
+
+    .pillar-title {
+      font-family: var(--font-heading);
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--bouygues-blue);
+      margin-bottom: 6px;
+    }
+
+    .pillar-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+    /* Controls at the bottom */
+    .pres-footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      z-index: 100;
+    }
+
+    .progress-bar-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: rgba(0, 0, 0, 0.05);
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--bouygues-blue) 0%, var(--paprika-orange) 100%);
+      width: 16.66%;
+      transition: width var(--transition-speed) ease;
+    }
+
+    .slide-counter {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+
+    .slide-counter span {
+      color: var(--paprika-orange);
+    }
+
+    .nav-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-nav {
+      background: var(--bouygues-blue);
+      color: white;
+      border: none;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      font-size: 0.9rem;
+    }
+
+    .btn-nav:hover {
+      background: var(--bouygues-cyan);
+      transform: scale(1.05);
+    }
+
+    .slide-dots {
+      display: flex;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--border-color);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .dot.active {
+      width: 28px;
+      background: var(--paprika-orange);
+    }
+
+    /* Overview Modal */
+    .overview-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(8px);
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .overview-modal.open {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .overview-content {
+      background: #ffffff;
+      border-radius: 20px;
+      max-width: 1100px;
+      width: 100%;
+      max-height: 85vh;
+      overflow-y: auto;
+      padding: 30px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    }
+
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .thumb-card {
+      background: #f8fafc;
+      border: 2px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .thumb-card:hover, .thumb-card.active {
+      border-color: var(--paprika-orange);
+      background: #fff7ed;
+      transform: translateY(-2px);
+    }
+
+    .thumb-num {
+      font-size: 0.75rem;
+      font-weight: 800;
+      color: var(--paprika-orange);
+    }
+
+    .thumb-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--bouygues-blue);
+      margin: 4px 0;
+    }
+
+    .thumb-subtitle {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    /* Speaker Notes Drawer */
+    .speaker-drawer {
+      position: fixed;
+      bottom: 60px;
+      right: 24px;
+      width: 380px;
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+      z-index: 150;
+      transform: translateY(20px);
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.2s ease;
+    }
+
+    .speaker-drawer.open {
+      transform: translateY(0);
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .speaker-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--bouygues-blue);
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .speaker-content {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header class="pres-header">
+    <div class="brand-group">
+      <img src="img/bouygues_telecom_logo.png" alt="Bouygues Telecom" class="brand-logo-small">
+      <div class="brand-divider"></div>
+      <div class="brand-title-badge">
+        <i class="fa-solid fa-shield-halved"></i> AuditFlow Pro — Synthèse Décisionnelle Top Management
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn-tool" id="btnOverview" title="Vue d'ensemble des 6 slides (G)"><i class="fa-solid fa-grip"></i> Sommaire</button>
+      <button class="btn-tool" id="btnSpeakerNotes" title="Notes de cadrage (S)"><i class="fa-regular fa-comment-dots"></i> Pitch Notes</button>
+      <button class="btn-tool" id="btnFullscreen" title="Plein écran (F)"><i class="fa-solid fa-expand"></i> Plein écran</button>
+      <a href="index.html" class="btn-tool" style="background:var(--bouygues-blue); color:white; border-color:var(--bouygues-blue);">
+        <i class="fa-solid fa-arrow-left"></i> Accéder à l'Application
+      </a>
+    </div>
+  </header>
+
+  <!-- Presentation Stage -->
+  <main class="pres-viewport">
+    <div class="slide-deck">
+
+      <!-- ==========================================
+           SLIDE 1 : TITRE & VISION STRATÉGIQUE
+           ========================================== -->
+      <section class="slide active" data-title="Vision & Proposition de Valeur" data-notes="Présentez la vision : AuditFlow Pro est la plateforme souveraine de Bouygues Telecom permettant de fiabiliser les processus Camunda 7 & 8, d'accélérer les livraisons et de garantir 0 incident en production grâce à un audit instantané.">
+        <div class="slide-content">
+          <div class="hero-container">
+            <div>
+              <div class="hero-badge-row">
+                <span class="hero-badge"><i class="fa-solid fa-bolt"></i> Gains Mesurables Immédiats</span>
+                <span class="hero-badge"><i class="fa-solid fa-lock"></i> 100% Souverain (Zero-Backend)</span>
+                <span class="hero-badge"><i class="fa-solid fa-check-double"></i> Camunda 7 &amp; 8 Zeebe</span>
+              </div>
+              <h1 class="hero-title">AuditFlow Pro<br><span>Gouvernance &amp; Qualité BPMN</span></h1>
+              <p class="hero-tagline">
+                La solution d'excellence opérationnelle pour sécuriser la transformation digitale, éliminer la dette technique et démultiplier la productivité des équipes Camunda chez <strong>Bouygues Telecom</strong>.
+              </p>
+              <div class="hero-highlights-box">
+                <div class="hero-hl-item">
+                  <div class="hero-hl-num">&lt; 3s</div>
+                  <div class="hero-hl-lbl">Audit global d'un lot complet</div>
+                </div>
+                <div class="hero-hl-item">
+                  <div class="hero-hl-num">-85%</div>
+                  <div class="hero-hl-lbl">Temps de revue &amp; validation</div>
+                </div>
+                <div class="hero-hl-item">
+                  <div class="hero-hl-num">0€</div>
+                  <div class="hero-hl-lbl">Coût infrastructure (Client-Side)</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="hero-visual-card">
+              <div class="hero-visual-header">
+                <img src="img/4.png" alt="AuditFlow Mascot" class="hero-mascot-img">
+                <div>
+                  <h3 style="font-family:var(--font-heading); color:var(--bouygues-blue); font-size:1.2rem; font-weight:800;">Cockpit Exécutif DSI</h3>
+                  <p style="font-size:0.82rem; color:var(--text-muted);">Direction des Systèmes d'Information</p>
+                </div>
+              </div>
+              <div style="background:#ffffff; border-radius:12px; padding:14px; border:1px solid var(--border-color); font-size:0.85rem; line-height:1.6; color:var(--text-main);">
+                <div style="display:flex; justify-content:space-between; margin-bottom:6px; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">
+                  <span style="color:var(--text-muted);"><i class="fa-solid fa-chart-line"></i> Score Qualité Cible :</span>
+                  <strong style="color:var(--accent-green);">100% Conforme</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:6px; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">
+                  <span style="color:var(--text-muted);"><i class="fa-solid fa-shield-virus"></i> Risque d'Incident Prod :</span>
+                  <strong style="color:var(--bouygues-blue);">Quasi nul (0 bug variable)</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color:var(--text-muted);"><i class="fa-solid fa-business-time"></i> ROI Constaté :</span>
+                  <strong style="color:var(--paprika-orange);">&gt; 350% dès l'An 1</strong>
+                </div>
+              </div>
+              <div style="font-size:0.75rem; color:var(--text-dim); text-align:center;">
+                Plateforme déployée pour les équipes de conception &amp; delivery
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           SLIDE 2 : LES ENJEUX & LE COÛT DE LA NON-QUALITÉ
+           ========================================== -->
+      <section class="slide" data-title="Les Enjeux & Risques Métier" data-notes="Mettez l'accent sur les coûts cachés : sans outillage, l'audit manuel est chronophage, source d'erreurs humaines et crée une dette documentaire qui bloque la vitesse des projets.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-triangle-exclamation"></i> Contexte &amp; Défis</span>
+            <h2 class="slide-title">Les Enjeux : Pourquoi auditer nos processus BPMN ?</h2>
+            <p class="slide-subtitle">La non-qualité et le manque d'outillage pèsent directement sur la rentabilité et le Time-to-Market</p>
+          </div>
+        </div>
+        <div class="slide-content">
+          <div class="grid-3col">
+            <div class="card highlight-orange">
+              <div class="card-icon-circle icon-orange"><i class="fa-solid fa-stopwatch"></i></div>
+              <h3 class="card-title">Perte de Temps &amp; Coûts Cachés</h3>
+              <p class="card-text">
+                Les revues manuelles mobilisent <strong>3 à 5 jours/homme par release</strong>. Les développeurs et testeurs passent des heures à vérifier manuellement les noms de variables, sans garantie d'exhaustivité.
+              </p>
+              <div style="margin-top:auto; padding-top:12px; font-weight:700; color:var(--paprika-orange); font-size:0.82rem;">
+                <i class="fa-solid fa-arrow-down"></i> -85% d'effort manuel avec AuditFlow
+              </div>
+            </div>
+
+            <div class="card highlight-blue">
+              <div class="card-icon-circle icon-blue"><i class="fa-solid fa-bug"></i></div>
+              <h3 class="card-title">Incidents &amp; Blocages en Production</h3>
+              <p class="card-text">
+                Une simple faute de frappe (<code>Xnodes</code> vs <code>x_nodes</code>), une variable morte ou orpheline provoque des arrêts de flux critiques, générant des <strong>incidents d'exploitation et des réclamations client</strong>.
+              </p>
+              <div style="margin-top:auto; padding-top:12px; font-weight:700; color:var(--bouygues-blue); font-size:0.82rem;">
+                <i class="fa-solid fa-shield-check"></i> 0 régression prévisible en prod
+              </div>
+            </div>
+
+            <div class="card highlight-green">
+              <div class="card-icon-circle icon-green"><i class="fa-solid fa-book-bookmark"></i></div>
+              <h3 class="card-title">Dette Documentaire &amp; Onboarding</h3>
+              <p class="card-text">
+                Maintenir à jour les matrices d'activités, cartographies d'appels et dictionnaires de données est fastidieux. Les équipes perdent la vision d'ensemble lors des <strong>évolutions ou migrations Camunda 8</strong>.
+              </p>
+              <div style="margin-top:auto; padding-top:12px; font-weight:700; color:var(--accent-green); font-size:0.82rem;">
+                <i class="fa-solid fa-file-export"></i> Documentation générée en 1 clic
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           SLIDE 3 : LA SOLUTION AUDITFLOW PRO
+           ========================================== -->
+      <section class="slide" data-title="La Solution en 3 Piliers" data-notes="Insistez sur la simplicité : pas de serveur à installer, import par simple glisser-déposer de 1 à N fichiers BPMN, détection intelligente des doublons et auto-fix en 1 clic.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-wand-magic-sparkles"></i> Solution &amp; Innovation</span>
+            <h2 class="slide-title">AuditFlow Pro : Le Standard Qualité Clé en Main</h2>
+            <p class="slide-subtitle">Un cockpit unifié et automatisé pour gouverner l'ensemble du cycle de vie des processus</p>
+          </div>
+        </div>
+        <div class="slide-content">
+          <div class="pillar-row">
+            <div class="pillar-box">
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <span style="font-size:1.4rem;">⚡</span>
+                <h3 class="pillar-title">1. Audit Global &amp; Multi-BPMN</h3>
+              </div>
+              <p class="pillar-desc">
+                Analyse instantanée de 1 à <em>n</em> fichiers BPMN liés. Contrôle rigoureux de la conformité <code>camelCase</code>, détection des variables mortes (ghost) et non initialisées.
+              </p>
+              <ul style="margin-top:10px; padding-left:18px; font-size:0.8rem; color:var(--text-muted); line-height:1.6;">
+                <li>Traçabilité du cycle de vie (Read/Write/InOut)</li>
+                <li>Support natif Camunda 7 (JUEL) &amp; Camunda 8 (FEEL)</li>
+              </ul>
+            </div>
+
+            <div class="pillar-box orange">
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <span style="font-size:1.4rem;">🔍</span>
+                <h3 class="pillar-title" style="color:var(--paprika-orange);">2. Détection Doublons &amp; Auto-Fix</h3>
+              </div>
+              <p class="pillar-desc">
+                Moteur sémantique identifiant les quasi-doublons (ex: <code>Xnodes</code>, <code>x_nodes</code>, <code>idClient</code> / <code>clientId</code>) avec harmonisation et correction XML en un clic.
+              </p>
+              <ul style="margin-top:10px; padding-left:18px; font-size:0.8rem; color:var(--text-muted); line-height:1.6;">
+                <li>Tolérance aux coquilles &amp; permutations (Levenshtein)</li>
+                <li>Téléchargement immédiat du pack BPMN corrigé</li>
+              </ul>
+            </div>
+
+            <div class="pillar-box green">
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <span style="font-size:1.4rem;">📊</span>
+                <h3 class="pillar-title" style="color:var(--accent-green);">3. Cartographie &amp; Gouvernance</h3>
+              </div>
+              <p class="pillar-desc">
+                Visualisation claire des arborescences d'appels (Call Activities), détection des boucles infinies et génération automatique de dossiers techniques et rapports exécutifs.
+              </p>
+              <ul style="margin-top:10px; padding-left:18px; font-size:0.8rem; color:var(--text-muted); line-height:1.6;">
+                <li>Exports certifiés : Excel multi-onglets, CSV, JSON, PDF</li>
+                <li>Gouvernance PMG &amp; tags d'équipes propriétaires</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           SLIDE 4 : LES GAINS CHIFFRÉS & ROI
+           ========================================== -->
+      <section class="slide" data-title="Gains Réels & Rentabilité" data-notes="Slide reine pour le Top Management : mettez en avant le gain de temps (3s vs 4h), la rentabilité immédiate et la réduction drastique du risque d'incident.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-chart-pie"></i> Valeur Mesurée</span>
+            <h2 class="slide-title">Impact Mesuré : Gains en Chiffres, Temps &amp; Qualité</h2>
+            <p class="slide-subtitle">Un retour sur investissement tangible et validé dès les premières semaines d'utilisation</p>
+          </div>
+        </div>
+        <div class="slide-content">
+          <div class="grid-4kpi">
+            <div class="card highlight-orange" style="padding:14px 16px; text-align:center;">
+              <div class="card-stat stat-orange">-85%</div>
+              <div style="font-weight:700; font-size:0.85rem; color:var(--bouygues-blue);">Temps de Revue</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">De 4h à &lt; 3 sec par modèle</div>
+            </div>
+
+            <div class="card highlight-green" style="padding:14px 16px; text-align:center;">
+              <div class="card-stat stat-green">100%</div>
+              <div style="font-weight:700; font-size:0.85rem; color:var(--bouygues-blue);">Zéro Erreur Critique</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">Élimination des bugs variables</div>
+            </div>
+
+            <div class="card highlight-blue" style="padding:14px 16px; text-align:center;">
+              <div class="card-stat stat-blue">&gt; 350%</div>
+              <div style="font-weight:700; font-size:0.85rem; color:var(--bouygues-blue);">ROI Constaté</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">Amortissement en &lt; 3 mois</div>
+            </div>
+
+            <div class="card highlight-orange" style="padding:14px 16px; text-align:center;">
+              <div class="card-stat stat-orange">0 €</div>
+              <div style="font-weight:700; font-size:0.85rem; color:var(--bouygues-blue);">Coût d'Infrastructure</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">Zero-backend, 100% navigateur</div>
+            </div>
+          </div>
+
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th style="width:30%;">Axe d'Amélioration Stratégique</th>
+                <th style="width:35%;">Avant (Pratiques Manuelles)</th>
+                <th style="width:35%;">Avec AuditFlow Pro</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Audit &amp; Validation d'un lot BPMN</strong></td>
+                <td><span class="tag-before">2 à 4 heures / lot</span> (Fastidieux &amp; incomplet)</td>
+                <td><span class="tag-after">&lt; 3 secondes</span> (Automatique &amp; exhaustif)</td>
+              </tr>
+              <tr>
+                <td><strong>Fiabilité des flux en Production</strong></td>
+                <td><span class="tag-before">Détection tardive en run</span> (Hotfixes coûteux)</td>
+                <td><span class="tag-after">0 incident variable</span> (Contrôle préventif)</td>
+              </tr>
+              <tr>
+                <td><strong>Dossiers Techniques &amp; Documentation</strong></td>
+                <td><span class="tag-before">Rédaction manuelle rare</span> (Vite obsolète)</td>
+                <td><span class="tag-after">1 clic (Markdown / PDF / Excel)</span> (Toujours à jour)</td>
+              </tr>
+              <tr>
+                <td><strong>Harmonisation des Doublons</strong></td>
+                <td><span class="tag-before">Ignorée ou refactoring lourd</span></td>
+                <td><span class="tag-after">Auto-Fix intelligent en lot (ZIP)</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           SLIDE 5 : SÉCURITÉ, CONFORMITÉ & TIME-TO-MARKET
+           ========================================== -->
+      <section class="slide" data-title="Sécurité, Souveraineté & TTM" data-notes="Rassurez sur la conformité DSI : Zéro flux sortant, sécurité totale RGPD, classification des données sensibles et accélération directe des projets métiers.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-lock"></i> Sécurité &amp; Alignement</span>
+            <h2 class="slide-title">Souveraineté, Sécurité &amp; Time-to-Market</h2>
+            <p class="slide-subtitle">Une architecture pensée pour répondre aux exigences les plus strictes de la DSI Bouygues Telecom</p>
+          </div>
+        </div>
+        <div class="slide-content">
+          <div class="grid-3col">
+            <div class="card highlight-blue">
+              <div class="card-icon-circle icon-blue"><i class="fa-solid fa-user-shield"></i></div>
+              <h3 class="card-title">Sécurité &amp; Confidentialité 100%</h3>
+              <p class="card-text">
+                Architecture <strong>Zero-Backend</strong> : aucun modèle, aucune variable ne transite sur un serveur tiers. L'intégralité des calculs s'exécute dans la mémoire sécurisée du navigateur de l'utilisateur.
+              </p>
+              <div style="margin-top:auto; padding-top:10px; font-size:0.8rem; color:var(--bouygues-blue); font-weight:700;">
+                ✓ Conforme aux chartes de sécurité DSI
+              </div>
+            </div>
+
+            <div class="card highlight-orange">
+              <div class="card-icon-circle icon-orange"><i class="fa-solid fa-rocket"></i></div>
+              <h3 class="card-title">Accélération Time-to-Market</h3>
+              <p class="card-text">
+                En supprimant les allers-retours entre développeurs, architectes et testeurs, AuditFlow Pro <strong>réduit de 30% la durée des cycles de recette</strong> et accélère le lancement des nouvelles offres télécoms.
+              </p>
+              <div style="margin-top:auto; padding-top:10px; font-size:0.8rem; color:var(--paprika-orange); font-weight:700;">
+                ✓ Déploiements plus fréquents et sereins
+              </div>
+            </div>
+
+            <div class="card highlight-green">
+              <div class="card-icon-circle icon-green"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+              <h3 class="card-title">Migration Camunda 8 Facilitée</h3>
+              <p class="card-text">
+                Standardisation continue des expressions JUEL vers FEEL et qualification des Call Activities, garantissant une <strong>transition sans accroc vers Camunda 8 Zeebe</strong> et le Cloud.
+              </p>
+              <div style="margin-top:auto; padding-top:10px; font-size:0.8rem; color:var(--accent-green); font-weight:700;">
+                ✓ Pérennité et modernisation du socle
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           SLIDE 6 : CONCLUSION & SYNTHÈSE DÉCISIONNELLE
+           ========================================== -->
+      <section class="slide" data-title="Plan d'Action & Déploiement" data-notes="Concluez avec l'appel à l'action : adoption immédiate sans investissement lourd, intégration dans les rituels de livraison comme porte qualité obligatoire.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-flag-checkered"></i> Synthèse Décisionnelle</span>
+            <h2 class="slide-title">Conclusion &amp; Prochaines Étapes</h2>
+            <p class="slide-subtitle">Un outil prêt à l'emploi pour instituer la qualité comme standard chez Bouygues Telecom</p>
+          </div>
+        </div>
+        <div class="slide-content">
+          <div class="grid-2col" style="align-items:center;">
+            <div class="card highlight-blue" style="height:auto;">
+              <h3 style="font-family:var(--font-heading); color:var(--bouygues-blue); font-size:1.3rem; margin-bottom:12px; font-weight:800;">
+                <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> Ce que nous gagnons immédiatement :
+              </h3>
+              <ul style="padding-left:20px; font-size:0.9rem; color:var(--text-main); line-height:1.8;">
+                <li><strong>Fiabilisation totale</strong> des flux BPMN et suppression des bugs de production.</li>
+                <li><strong>Économie récurrente de 40 à 120 k€ / an</strong> en temps d'ingénierie et de recette.</li>
+                <li><strong>Autonomie et vélocité</strong> accrues pour les équipes de développement.</li>
+                <li><strong>Transparence et gouvernance</strong> pour le management et les comités d'architecture.</li>
+              </ul>
+            </div>
+
+            <div class="card highlight-orange" style="height:auto;">
+              <h3 style="font-family:var(--font-heading); color:var(--paprika-orange); font-size:1.3rem; margin-bottom:12px; font-weight:800;">
+                <i class="fa-solid fa-play" style="color:var(--paprika-orange);"></i> Recommandations de Déploiement :
+              </h3>
+              <div style="font-size:0.88rem; color:var(--text-muted); line-height:1.6; display:flex; flex-direction:column; gap:10px;">
+                <div style="display:flex; align-items:flex-start; gap:10px;">
+                  <span style="background:var(--paprika-orange); color:white; border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:800; flex-shrink:0;">1</span>
+                  <span><strong>Généraliser l'outil</strong> auprès de l'ensemble des tech leads et concepteurs Camunda.</span>
+                </div>
+                <div style="display:flex; align-items:flex-start; gap:10px;">
+                  <span style="background:var(--paprika-orange); color:white; border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:800; flex-shrink:0;">2</span>
+                  <span><strong>Intégrer le rapport d'audit</strong> comme jalon qualité obligatoire avant chaque MEP.</span>
+                </div>
+                <div style="display:flex; align-items:flex-start; gap:10px;">
+                  <span style="background:var(--paprika-orange); color:white; border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:800; flex-shrink:0;">3</span>
+                  <span><strong>Exploiter les matrices PMG</strong> pour la documentation transverse de la DSI.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- Bottom Navigation Bar -->
+  <footer class="pres-footer">
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" id="progressBar"></div>
+    </div>
+    
+    <div class="slide-counter">
+      Slide <span id="currentSlideNum">01</span> / <span id="totalSlideNum">06</span>
+    </div>
+
+    <div class="slide-dots" id="dotsContainer"></div>
+
+    <div class="nav-controls">
+      <button class="btn-nav" id="btnPrev" title="Slide précédente (Flèche Gauche)"><i class="fa-solid fa-chevron-left"></i></button>
+      <button class="btn-nav" id="btnNext" title="Slide suivante (Flèche Droite ou Espace)"><i class="fa-solid fa-chevron-right"></i></button>
+    </div>
+  </footer>
+
+  <!-- Overview Modal -->
+  <div class="overview-modal" id="overviewModal">
+    <div class="overview-content">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:14px;">
+        <h3 style="font-family:var(--font-heading); color:var(--bouygues-blue); font-size:1.3rem;">Vue d'ensemble — Synthèse Exécutive</h3>
+        <button id="btnCloseOverview" class="btn-tool" style="font-size:1rem; padding:4px 10px;"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="overview-grid" id="overviewGrid"></div>
+    </div>
+  </div>
+
+  <!-- Speaker Notes Drawer -->
+  <div class="speaker-drawer" id="speakerNotesDrawer">
+    <div class="speaker-title">
+      <span><i class="fa-solid fa-clipboard-list" style="color:var(--paprika-orange);"></i> Notes de Pitch pour le Management</span>
+      <button id="btnCloseNotes" style="background:none; border:none; color:var(--text-muted); cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="speaker-content" id="speakerNotesContent">
+      Présentation exécutive pour le Top Management de Bouygues Telecom.
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const slides = Array.from(document.querySelectorAll('.slide'));
+      const totalSlides = slides.length;
+      let currentIndex = 0;
+
+      const currentNumEl = document.getElementById('currentSlideNum');
+      const totalNumEl = document.getElementById('totalSlideNum');
+      const progressBar = document.getElementById('progressBar');
+      const dotsContainer = document.getElementById('dotsContainer');
+      const overviewGrid = document.getElementById('overviewGrid');
+
+      const btnPrev = document.getElementById('btnPrev');
+      const btnNext = document.getElementById('btnNext');
+      const btnOverview = document.getElementById('btnOverview');
+      const btnCloseOverview = document.getElementById('btnCloseOverview');
+      const overviewModal = document.getElementById('overviewModal');
+      const btnSpeakerNotes = document.getElementById('btnSpeakerNotes');
+      const btnCloseNotes = document.getElementById('btnCloseNotes');
+      const speakerNotesDrawer = document.getElementById('speakerNotesDrawer');
+      const speakerNotesContent = document.getElementById('speakerNotesContent');
+      const btnFullscreen = document.getElementById('btnFullscreen');
+
+      totalNumEl.textContent = totalSlides.toString().padStart(2, '0');
+
+      // Build Navigation Dots & Overview Thumbnails
+      slides.forEach((slide, idx) => {
+        // Dot
+        const dot = document.createElement('div');
+        dot.className = `dot ${idx === 0 ? 'active' : ''}`;
+        dot.title = `Slide ${idx + 1}: ${slide.dataset.title || ''}`;
+        dot.addEventListener('click', () => goToSlide(idx));
+        dotsContainer.appendChild(dot);
+
+        // Overview Thumb
+        const thumb = document.createElement('div');
+        thumb.className = `thumb-card ${idx === 0 ? 'active' : ''}`;
+        thumb.innerHTML = `
+          <span class="thumb-num">#${idx + 1}</span>
+          <h4 class="thumb-title">${slide.dataset.title || `Slide ${idx + 1}`}</h4>
+          <p class="thumb-subtitle">${slide.querySelector('.slide-subtitle')?.textContent || slide.querySelector('.hero-tagline')?.textContent || ''}</p>
+        `;
+        thumb.addEventListener('click', () => {
+          goToSlide(idx);
+          closeOverview();
+        });
+        overviewGrid.appendChild(thumb);
+      });
+
+      function updateSlide() {
+        slides.forEach((slide, idx) => {
+          slide.classList.remove('active', 'prev');
+          if (idx === currentIndex) {
+            slide.classList.add('active');
+          } else if (idx < currentIndex) {
+            slide.classList.add('prev');
+          }
+        });
+
+        currentNumEl.textContent = (currentIndex + 1).toString().padStart(2, '0');
+        const progress = ((currentIndex + 1) / totalSlides) * 100;
+        progressBar.style.width = `${progress}%`;
+
+        const dots = dotsContainer.querySelectorAll('.dot');
+        dots.forEach((dot, idx) => {
+          dot.classList.toggle('active', idx === currentIndex);
+        });
+
+        const thumbs = overviewGrid.querySelectorAll('.thumb-card');
+        thumbs.forEach((thumb, idx) => {
+          thumb.classList.toggle('active', idx === currentIndex);
+        });
+
+        const currentSlide = slides[currentIndex];
+        speakerNotesContent.textContent = currentSlide.dataset.notes || 'Aucune note pour cette diapositive.';
+      }
+
+      function goToSlide(index) {
+        if (index >= 0 && index < totalSlides) {
+          currentIndex = index;
+          updateSlide();
+        }
+      }
+
+      function nextSlide() {
+        if (currentIndex < totalSlides - 1) {
+          goToSlide(currentIndex + 1);
+        }
+      }
+
+      function prevSlide() {
+        if (currentIndex > 0) {
+          goToSlide(currentIndex - 1);
+        }
+      }
+
+      function toggleOverview() {
+        overviewModal.classList.toggle('open');
+      }
+
+      function closeOverview() {
+        overviewModal.classList.remove('open');
+      }
+
+      function toggleSpeakerNotes() {
+        speakerNotesDrawer.classList.toggle('open');
+        btnSpeakerNotes.classList.toggle('active');
+      }
+
+      function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+          document.exitFullscreen().catch(() => {});
+        }
+      }
+
+      btnNext.addEventListener('click', nextSlide);
+      btnPrev.addEventListener('click', prevSlide);
+      btnOverview.addEventListener('click', toggleOverview);
+      btnCloseOverview.addEventListener('click', closeOverview);
+      btnSpeakerNotes.addEventListener('click', toggleSpeakerNotes);
+      btnCloseNotes.addEventListener('click', toggleSpeakerNotes);
+      btnFullscreen.addEventListener('click', toggleFullscreen);
+
+      // Keyboard navigation
+      document.addEventListener('keydown', (e) => {
+        if (overviewModal.classList.contains('open')) {
+          if (e.key === 'Escape') closeOverview();
+          return;
+        }
+
+        switch (e.key) {
+          case 'ArrowRight':
+          case 'ArrowDown':
+          case ' ':
+          case 'PageDown':
+            e.preventDefault();
+            nextSlide();
+            break;
+          case 'ArrowLeft':
+          case 'ArrowUp':
+          case 'PageUp':
+            e.preventDefault();
+            prevSlide();
+            break;
+          case 'Home':
+            e.preventDefault();
+            goToSlide(0);
+            break;
+          case 'End':
+            e.preventDefault();
+            goToSlide(totalSlides - 1);
+            break;
+          case 'g':
+          case 'G':
+            toggleOverview();
+            break;
+          case 's':
+          case 'S':
+            toggleSpeakerNotes();
+            break;
+          case 'f':
+          case 'F':
+            toggleFullscreen();
+            break;
+          case 'Escape':
+            closeOverview();
+            speakerNotesDrawer.classList.remove('open');
+            btnSpeakerNotes.classList.remove('active');
+            break;
+        }
+      });
+
+      updateSlide();
+    });
+  </script>
+</body>
+</html>

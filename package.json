@@ -1,0 +1,39 @@
+{
+  "name": "auditflow-pro",
+  "version": "1.0.0",
+  "description": "Bouygues Telecom - AuditFlow Pro | Audit, Gouvernance & Documentation BPMN",
+  "main": "main.js",
+  "author": "Bouygues Telecom",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --dir",
+    "build:zip": "electron-builder --dir && powershell -Command \"Compress-Archive -Path dist/win-unpacked/* -DestinationPath dist/AuditFlow-Pro-Windows-v1.0.0.zip -Force\""
+  },
+  "devDependencies": {
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.bouyguestelecom.auditflowpro",
+    "productName": "AuditFlow Pro",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "manifest.json",
+      "sw.js",
+      "css/**/*",
+      "js/**/*",
+      "img/**/*",
+      "main.js"
+    ],
+    "win": {
+      "target": [
+        "dir",
+        "zip"
+      ],
+      "icon": "img/app_icon.png"
+    }
+  }
+}

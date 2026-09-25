@@ -1,0 +1,16 @@
+{
+  "name": "Bouygues Telecom - AuditFlow Pro",
+  "short_name": "AuditFlow",
+  "description": "Plateforme d'audit, gouvernance, suivi et documentation des variables et flux Camunda / BPMN",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f4f7fb",
+  "theme_color": "#003882",
+  "icons": [
+    {
+      "src": "img/bouygues_telecom_logo.png",
+      "sizes": "192x192 512x512",
+      "type": "image/png"
+    }
+  ]
+}

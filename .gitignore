@@ -1,0 +1,8 @@
+echo node_modules/ >> .gitignore
+echo dist/ >> .gitignore
+echo bpmn-naming-auditor-wp/ >> .gitignore
+echo bpmn-subprocesses-analyzer-wp/ >> .gitignorenode_modules/
+dist/
+bpmn-naming-auditor-wp/
+bpmn-subprocesses-analyzer-wp/
+*.zip

@@ -1,0 +1,1649 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paprika AuditFlow Pro — Présentation Officielle</title>
+  <link rel="icon" type="image/png" href="img/loading.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-surface: #0f172a;
+      --bg-surface-elevated: #1e293b;
+      --bg-card: rgba(30, 41, 59, 0.7);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-color-glow: rgba(234, 91, 12, 0.3);
+      
+      --paprika-orange: #ea5b0c;
+      --paprika-orange-light: #ff7d33;
+      --paprika-orange-glow: rgba(234, 91, 12, 0.4);
+      --bouygues-blue: #003882;
+      --bouygues-cyan: #0284c7;
+      --accent-green: #10b981;
+      --accent-purple: #8b5cf6;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+      
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --slide-width: 1280px;
+      --slide-height: 720px;
+      --slide-ratio: 16 / 9;
+      --font-heading: 'Outfit', sans-serif;
+      --font-body: 'Plus Jakarta Sans', sans-serif;
+      --font-code: 'Fira Code', monospace;
+      --transition-speed: 0.4s;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: var(--font-body);
+      min-height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      background-image: 
+        radial-gradient(circle at 10% 20%, rgba(0, 56, 130, 0.25) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(234, 91, 12, 0.2) 0%, transparent 40%),
+        radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.8) 0%, transparent 100%);
+    }
+
+    /* Top presentation toolbar */
+    .pres-header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      z-index: 100;
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo-small {
+      height: 32px;
+      width: auto;
+      object-fit: contain;
+    }
+
+    .brand-divider {
+      width: 1px;
+      height: 20px;
+      background: var(--border-color);
+    }
+
+    .brand-title-badge {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--paprika-orange-light);
+      background: rgba(234, 91, 12, 0.12);
+      border: 1px solid rgba(234, 91, 12, 0.25);
+      padding: 4px 10px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-tool {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      text-decoration: none;
+    }
+
+    .btn-tool:hover {
+      color: var(--text-main);
+      border-color: var(--paprika-orange);
+      background: rgba(234, 91, 12, 0.1);
+    }
+
+    .btn-tool.active {
+      background: var(--paprika-orange);
+      color: white;
+      border-color: var(--paprika-orange);
+    }
+
+    /* Presentation Canvas Stage */
+    .pres-viewport {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 70px 24px 70px 24px;
+    }
+
+    .slide-deck {
+      position: relative;
+      width: var(--slide-width);
+      height: var(--slide-height);
+      max-width: 95vw;
+      max-height: 82vh;
+      aspect-ratio: var(--slide-ratio);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 40px rgba(234, 91, 12, 0.08);
+      overflow: hidden;
+      display: flex;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      padding: 48px 56px;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateX(40px) scale(0.98);
+      transition: opacity var(--transition-speed) ease, transform var(--transition-speed) cubic-bezier(0.16, 1, 0.3, 1), visibility var(--transition-speed);
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(10, 15, 29, 0.98) 100%);
+      overflow: hidden;
+    }
+
+    .slide.active {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(0) scale(1);
+      z-index: 2;
+    }
+
+    .slide.prev {
+      transform: translateX(-40px) scale(0.98);
+    }
+
+    /* Watermark Logo */
+    .slide-watermark {
+      position: absolute;
+      right: -40px;
+      bottom: -40px;
+      width: 280px;
+      height: 280px;
+      opacity: 0.03;
+      pointer-events: none;
+      object-fit: contain;
+    }
+
+    /* Slide Header */
+    .slide-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 24px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .slide-meta-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--paprika-orange-light);
+      background: rgba(234, 91, 12, 0.12);
+      border: 1px solid rgba(234, 91, 12, 0.25);
+      padding: 4px 10px;
+      border-radius: 100px;
+      margin-bottom: 8px;
+    }
+
+    .slide-title {
+      font-family: var(--font-heading);
+      font-size: 2.2rem;
+      font-weight: 800;
+      line-height: 1.15;
+      background: linear-gradient(135deg, #ffffff 30%, #cbd5e1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .slide-subtitle {
+      font-size: 1rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      font-weight: 400;
+    }
+
+    .slide-mascot-corner {
+      width: 70px;
+      height: 70px;
+      object-fit: contain;
+      filter: drop-shadow(0 8px 16px rgba(234, 91, 12, 0.3));
+      animation: floatSlow 4s ease-in-out infinite alternate;
+    }
+
+    @keyframes floatSlow {
+      0% { transform: translateY(0px) rotate(0deg); }
+      100% { transform: translateY(-8px) rotate(3deg); }
+    }
+
+    /* Slide Content Area */
+    .slide-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      position: relative;
+      z-index: 2;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .slide-content::-webkit-scrollbar {
+      width: 4px;
+    }
+    .slide-content::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+
+    /* Grid Layouts */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      align-items: stretch;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      transition: all 0.3s ease;
+      position: relative;
+      backdrop-filter: blur(10px);
+    }
+
+    .card:hover {
+      border-color: rgba(234, 91, 12, 0.4);
+      transform: translateY(-3px);
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4), 0 0 15px rgba(234, 91, 12, 0.1);
+    }
+
+    .card-icon-box {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      background: rgba(234, 91, 12, 0.15);
+      border: 1px solid rgba(234, 91, 12, 0.3);
+      color: var(--paprika-orange-light);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      margin-bottom: 14px;
+    }
+
+    .card-icon-box.blue {
+      background: rgba(2, 132, 199, 0.15);
+      border-color: rgba(2, 132, 199, 0.3);
+      color: #38bdf8;
+    }
+
+    .card-icon-box.green {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(16, 185, 129, 0.3);
+      color: #34d399;
+    }
+
+    .card-icon-box.purple {
+      background: rgba(139, 92, 246, 0.15);
+      border-color: rgba(139, 92, 246, 0.3);
+      color: #a78bfa;
+    }
+
+    .card-icon-box.rose {
+      background: rgba(244, 63, 94, 0.15);
+      border-color: rgba(244, 63, 94, 0.3);
+      color: #fb7185;
+    }
+
+    .card-title {
+      font-family: var(--font-heading);
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 8px;
+    }
+
+    .card-desc {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .card-list {
+      list-style: none;
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .card-list li {
+      font-size: 0.82rem;
+      color: #cbd5e1;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      line-height: 1.4;
+    }
+
+    .card-list li i {
+      color: var(--paprika-orange-light);
+      margin-top: 3px;
+      font-size: 0.75rem;
+    }
+
+    /* Badge Pills */
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .pill-orange { background: rgba(234, 91, 12, 0.15); color: #ff7d33; border: 1px solid rgba(234, 91, 12, 0.3); }
+    .pill-blue { background: rgba(2, 132, 199, 0.15); color: #38bdf8; border: 1px solid rgba(2, 132, 199, 0.3); }
+    .pill-green { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .pill-purple { background: rgba(139, 92, 246, 0.15); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.3); }
+
+    /* Title Slide Specific */
+    .slide-hero {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+    }
+
+    .hero-logos {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .hero-logo-img {
+      height: 64px;
+      object-fit: contain;
+      filter: drop-shadow(0 4px 12px rgba(0,0,0,0.5));
+    }
+
+    .hero-divider {
+      width: 2px;
+      height: 48px;
+      background: var(--border-color);
+    }
+
+    .hero-mascot-wrapper {
+      position: relative;
+      margin-bottom: 18px;
+    }
+
+    .hero-mascot {
+      width: 110px;
+      height: 110px;
+      object-fit: contain;
+      filter: drop-shadow(0 10px 25px rgba(234, 91, 12, 0.5));
+      animation: heroBounce 3s ease-in-out infinite alternate;
+    }
+
+    @keyframes heroBounce {
+      0% { transform: translateY(0) scale(1); }
+      100% { transform: translateY(-10px) scale(1.03); }
+    }
+
+    .hero-title {
+      font-family: var(--font-heading);
+      font-size: 3.4rem;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      line-height: 1.1;
+      background: linear-gradient(135deg, #ffffff 0%, #ffd0b3 50%, #ea5b0c 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 12px;
+    }
+
+    .hero-tagline {
+      font-size: 1.25rem;
+      color: #94a3b8;
+      max-width: 820px;
+      line-height: 1.5;
+      margin-bottom: 28px;
+    }
+
+    .hero-badges {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    .hero-badge-item {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid var(--border-color);
+      padding: 8px 16px;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #e2e8f0;
+      backdrop-filter: blur(8px);
+    }
+
+    .hero-badge-item i {
+      color: var(--paprika-orange-light);
+    }
+
+    /* Metrics & Stats Row */
+    .stat-box {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-val {
+      font-family: var(--font-heading);
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--paprika-orange-light);
+      margin-bottom: 4px;
+    }
+
+    .stat-lbl {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+
+    /* Comparison Table / Box */
+    .compare-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .compare-box {
+      border-radius: 14px;
+      padding: 20px;
+      position: relative;
+    }
+
+    .compare-box.bad {
+      background: rgba(244, 63, 94, 0.06);
+      border: 1px solid rgba(244, 63, 94, 0.25);
+    }
+
+    .compare-box.good {
+      background: rgba(16, 185, 129, 0.06);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+
+    .compare-head {
+      font-family: var(--font-heading);
+      font-size: 1.1rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .compare-box.bad .compare-head { color: #fb7185; }
+    .compare-box.good .compare-head { color: #34d399; }
+
+    /* Bottom Control Bar */
+    .pres-footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: rgba(15, 23, 42, 0.9);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      z-index: 100;
+    }
+
+    .footer-left, .footer-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .slide-counter {
+      font-family: var(--font-code);
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .slide-counter .current-num {
+      color: var(--paprika-orange-light);
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+
+    .nav-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-size: 0.95rem;
+    }
+
+    .nav-btn:hover {
+      background: var(--paprika-orange);
+      border-color: var(--paprika-orange);
+      transform: translateY(-1px);
+    }
+
+    /* Progress Dots */
+    .slide-dots {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 100px;
+      background: rgba(255, 255, 255, 0.2);
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .dot:hover {
+      background: rgba(255, 255, 255, 0.5);
+    }
+
+    .dot.active {
+      width: 28px;
+      background: var(--paprika-orange);
+      box-shadow: 0 0 10px var(--paprika-orange-glow);
+    }
+
+    /* Slide Progress Bar */
+    .progress-bar-container {
+      position: fixed;
+      bottom: 60px;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.05);
+      z-index: 101;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #003882, #ea5b0c, #ff7d33);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    /* Grid Overview Modal */
+    .overview-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(9, 13, 22, 0.95);
+      backdrop-filter: blur(16px);
+      z-index: 200;
+      display: none;
+      flex-direction: column;
+      padding: 40px;
+      overflow-y: auto;
+    }
+
+    .overview-modal.open {
+      display: flex;
+    }
+
+    .overview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 30px;
+    }
+
+    .overview-title {
+      font-family: var(--font-heading);
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: white;
+    }
+
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 20px;
+    }
+
+    .thumb-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    .thumb-card:hover {
+      border-color: var(--paprika-orange);
+      transform: translateY(-4px);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    .thumb-card.active {
+      border-color: var(--paprika-orange);
+      background: rgba(234, 91, 12, 0.08);
+      box-shadow: 0 0 15px rgba(234, 91, 12, 0.2);
+    }
+
+    .thumb-num {
+      position: absolute;
+      top: 10px;
+      right: 12px;
+      font-size: 0.8rem;
+      font-family: var(--font-code);
+      color: var(--text-dim);
+      font-weight: 700;
+    }
+
+    .thumb-title {
+      font-family: var(--font-heading);
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 6px;
+      padding-right: 24px;
+    }
+
+    .thumb-subtitle {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* Speaker Notes Drawer */
+    .speaker-notes-drawer {
+      position: fixed;
+      bottom: 60px;
+      right: 20px;
+      width: 400px;
+      max-height: 320px;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      backdrop-filter: blur(16px);
+      padding: 16px 20px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      display: none;
+      flex-direction: column;
+      z-index: 150;
+      overflow-y: auto;
+    }
+
+    .speaker-notes-drawer.open {
+      display: flex;
+    }
+
+    .notes-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--paprika-orange-light);
+    }
+
+    .notes-body {
+      font-size: 0.85rem;
+      color: #cbd5e1;
+      line-height: 1.5;
+    }
+
+    /* Print styles for PDF export */
+    @media print {
+      body {
+        background: #090d16 !important;
+        overflow: visible !important;
+      }
+      .pres-header, .pres-footer, .progress-bar-container, .speaker-notes-drawer, .overview-modal {
+        display: none !important;
+      }
+      .pres-viewport {
+        padding: 0 !important;
+        height: auto !important;
+      }
+      .slide-deck {
+        width: 100% !important;
+        height: auto !important;
+        box-shadow: none !important;
+        border: none !important;
+      }
+      .slide {
+        position: relative !important;
+        page-break-after: always !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        transform: none !important;
+        margin-bottom: 40px !important;
+        height: 100vh !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header Toolbar -->
+  <header class="pres-header">
+    <div class="brand-group">
+      <img src="img/bouygues_telecom_logo.png" alt="Bouygues Telecom" class="brand-logo-small">
+      <div class="brand-divider"></div>
+      <img src="img/paprika_logo.png" alt="Paprika" class="brand-logo-small">
+      <span class="brand-title-badge">
+        <i class="fa-solid fa-pepper-hot"></i> AuditFlow Pro
+      </span>
+    </div>
+
+    <div class="header-actions">
+      <a href="presentation_light.html" class="btn-tool" title="Basculer vers le Thème Clair">
+        <i class="fa-solid fa-sun"></i> Thème Clair
+      </a>
+      <button class="btn-tool" id="btn-speaker-notes" title="Notes de l'orateur (Touche S)">
+        <i class="fa-solid fa-comment-dots"></i> Notes <kbd style="font-size:0.7rem; opacity:0.6;">S</kbd>
+      </button>
+      <button class="btn-tool" id="btn-overview" title="Vue d'ensemble des slides (Touche G)">
+        <i class="fa-solid fa-table-cells-large"></i> Grille <kbd style="font-size:0.7rem; opacity:0.6;">G</kbd>
+      </button>
+      <button class="btn-tool" id="btn-fullscreen" title="Plein écran (Touche F)">
+        <i class="fa-solid fa-expand"></i> Plein Écran <kbd style="font-size:0.7rem; opacity:0.6;">F</kbd>
+      </button>
+      <button class="btn-tool active" onclick="window.print()" title="Imprimer ou Exporter en PDF">
+        <i class="fa-solid fa-file-pdf"></i> Exporter PDF
+      </button>
+    </div>
+  </header>
+
+  <!-- Progress Bar -->
+  <div class="progress-bar-container">
+    <div class="progress-bar-fill" id="progress-bar"></div>
+  </div>
+
+  <!-- Main Viewport -->
+  <main class="pres-viewport">
+    <div class="slide-deck" id="slide-deck">
+
+      <!-- SLIDE 1: Title & Hero -->
+      <section class="slide active" data-title="Titre" data-notes="Bienvenue à tous. Aujourd'hui nous présentons Paprika AuditFlow Pro, la plateforme de référence pour l'audit, la cartographie hiérarchique et la gouvernance automatisée des processus Camunda 7 et 8 Zeebe chez Bouygues Telecom.">
+        <img src="img/paprika_logo.png" alt="" class="slide-watermark">
+        <div class="slide-hero">
+          <div class="hero-logos">
+            <img src="img/bouygues_telecom_logo.png" alt="Bouygues Telecom" class="hero-logo-img">
+            <div class="hero-divider"></div>
+            <img src="img/Camunda_logo.png" alt="Camunda 7 & 8" class="hero-logo-img">
+          </div>
+          
+          <div class="hero-mascot-wrapper">
+            <img src="img/4.png" alt="Paprika Mascot" class="hero-mascot">
+          </div>
+
+          <h1 class="hero-title">Paprika AuditFlow Pro</h1>
+          <p class="hero-tagline">
+            La suite unifiée d'audit qualité, de cartographie hiérarchique multi-BPMN et de gouvernance logicielle pour <strong>Camunda Platform 7 & 8 (Zeebe)</strong>.
+          </p>
+
+          <div class="hero-badges">
+            <div class="hero-badge-item">
+              <i class="fa-solid fa-shield-halved"></i> 100% Client-Side & Zéro Backend
+            </div>
+            <div class="hero-badge-item">
+              <i class="fa-solid fa-bolt"></i> Auto-Fix 1-Clic Multi-BPMN
+            </div>
+            <div class="hero-badge-item">
+              <i class="fa-solid fa-diagram-project"></i> Camunda 7 (JUEL) & 8 (FEEL)
+            </div>
+            <div class="hero-badge-item">
+              <i class="fa-solid fa-file-invoice-dollar"></i> Simulateur de ROI Intégré
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 2: Le Contexte & Problématique -->
+      <section class="slide" data-title="Contexte & Enjeux" data-notes="Expliquer la complexité croissante des BPMN : prolifération des variables, incohérences de nommage, call activities imbriquées sans visibilité, absence de documentation à jour et bugs en production dus à des variables orphelines.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-triangle-exclamation"></i> Enjeux & Constat</span>
+            <h2 class="slide-title">Pourquoi auditer nos processus BPMN ?</h2>
+            <p class="slide-subtitle">Les défis majeurs de l'orchestration de processus à grande échelle</p>
+          </div>
+          <img src="img/6.png" alt="Paprika Diagnostic" class="slide-mascot-corner">
+        </div>
+
+        <div class="slide-content">
+          <div class="compare-container">
+            <div class="compare-box bad">
+              <div class="compare-head">
+                <i class="fa-solid fa-circle-xmark"></i> Sans Gouvernance Automatisée
+              </div>
+              <ul class="card-list">
+                <li><i class="fa-solid fa-times text-rose"></i> <strong>Variables fantômes (Ghost) :</strong> Données créées mais jamais consommées, alourdissant le contexte d'exécution.</li>
+                <li><i class="fa-solid fa-times text-rose"></i> <strong>Variables orphelines :</strong> Variables utilisées dans des gateways FEEL sans affectation préalable &rarr; Erreurs bloquantes en production.</li>
+                <li><i class="fa-solid fa-times text-rose"></i> <strong>Incohérences de nommage :</strong> Mélange de camelCase, snake_case, espaces, caractères spéciaux bloquant le moteur.</li>
+                <li><i class="fa-solid fa-times text-rose"></i> <strong>Effet "Boîte Noire" :</strong> Impossibilité de visualiser l'impact d'une modification sur les sous-processus appelés.</li>
+                <li><i class="fa-solid fa-times text-rose"></i> <strong>Documentation obsolète :</strong> Plusieurs jours d'effort manuel par release pour documenter les flux.</li>
+              </ul>
+            </div>
+
+            <div class="compare-box good">
+              <div class="compare-head">
+                <i class="fa-solid fa-circle-check"></i> Avec Paprika AuditFlow Pro
+              </div>
+              <ul class="card-list">
+                <li><i class="fa-solid fa-check text-green"></i> <strong>Détection instantanée :</strong> Analyse multi-BPMN en 1 clic avec traçabilité complète de chaque variable.</li>
+                <li><i class="fa-solid fa-check text-green"></i> <strong>Standardisation stricte :</strong> Application des règles d'ingénierie logicielle (camelCase, verbes d'action, gateways interrogatives).</li>
+                <li><i class="fa-solid fa-check text-green"></i> <strong>Cartographie hiérarchique :</strong> Visualisation topologique (DAG interactif) des orchestrateurs et call activities.</li>
+                <li><i class="fa-solid fa-check text-green"></i> <strong>Auto-Fix & ZIP coordonné :</strong> Correction automatique sans risque d'erreur humaine.</li>
+                <li><i class="fa-solid fa-check text-green"></i> <strong>Documentation PMG automatisée :</strong> Génération immédiate des matrices techniques et guides d'onboarding.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 3: Architecture & Sécurité Zero-Backend -->
+      <section class="slide" data-title="Architecture & Sécurité" data-notes="Mettre l'accent sur la sécurité : tout s'exécute dans le navigateur de l'utilisateur. Aucune donnée d'entreprise ne transite sur un serveur distant. Rapidité extrême et conformité RGPD/Sécurité Bouygues Telecom.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-microchip"></i> Architecture Technique</span>
+            <h2 class="slide-title">100% Client-Side & Zéro Backend</h2>
+            <p class="slide-subtitle">Une architecture ultra-sécurisée, instantanée et autonome</p>
+          </div>
+          <img src="img/4.png" alt="Paprika Tech" class="slide-mascot-corner">
+        </div>
+
+        <div class="slide-content">
+          <div class="grid-3">
+            <div class="card">
+              <div class="card-icon-box green">
+                <i class="fa-solid fa-shield-virus"></i>
+              </div>
+              <h3 class="card-title">Confidentialité Totale</h3>
+              <p class="card-desc">
+                Vos diagrammes BPMN et variables métier ne quittent <strong>jamais</strong> le poste de travail. Zéro transfert réseau externe.
+              </p>
+              <ul class="card-list">
+                <li><i class="fa-solid fa-check"></i> Parseur DOM XML natif JS</li>
+                <li><i class="fa-solid fa-check"></i> Conforme exigences sécurité SI</li>
+              </ul>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box blue">
+                <i class="fa-solid fa-gauge-high"></i>
+              </div>
+              <h3 class="card-title">Performance Instantanée</h3>
+              <p class="card-desc">
+                Analyse de dizaines de processus et de milliers de variables en moins de <strong>3 secondes</strong> sans latence serveur.
+              </p>
+              <ul class="card-list">
+                <li><i class="fa-solid fa-check"></i> Algorithmes graphes optimisés (DFS)</li>
+                <li><i class="fa-solid fa-check"></i> Rendu interactif via Vis.js</li>
+              </ul>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box purple">
+                <i class="fa-solid fa-database"></i>
+              </div>
+              <h3 class="card-title">Persistance & Offline</h3>
+              <p class="card-desc">
+                Fonctionne hors-ligne via <strong>Service Worker (PWA)</strong> avec persistance locale dans IndexedDB & LocalStorage.
+              </p>
+              <ul class="card-list">
+                <li><i class="fa-solid fa-check"></i> Historique des audits persistant</li>
+                <li><i class="fa-solid fa-check"></i> Export/Import JSON de sessions</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 4: Vue d'ensemble des 6 Modules -->
+      <section class="slide" data-title="Les 6 Modules" data-notes="Présenter les 6 grands piliers qui composent la suite Paprika AuditFlow Pro.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-cubes"></i> Fonctionnalités</span>
+            <h2 class="slide-title">Une suite complète en 6 Modules</h2>
+            <p class="slide-subtitle">Un écosystème unifié pour couvrir tout le cycle de vie du BPMN</p>
+          </div>
+          <img src="img/3.png" alt="Paprika Modules" class="slide-mascot-corner">
+        </div>
+
+        <div class="slide-content">
+          <div class="grid-3">
+            <div class="card">
+              <div class="card-icon-box">
+                <i class="fa-solid fa-code-compare"></i>
+              </div>
+              <h3 class="card-title">1. Audit Variables Multi-BPMN</h3>
+              <p class="card-desc">Audit syntaxique, détection de ghost variables, traçabilité I/O et auto-fix en lot.</p>
+              <div style="margin-top:auto;"><span class="pill pill-orange">Cœur de gouvernance</span></div>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box blue">
+                <i class="fa-solid fa-diagram-nested"></i>
+              </div>
+              <h3 class="card-title">2. Sous-processus & Dépendances</h3>
+              <p class="card-desc">Cartographie topologique, détection des boucles récursives infinies et criticité.</p>
+              <div style="margin-top:auto;"><span class="pill pill-blue">Analyse d'impact</span></div>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box green">
+                <i class="fa-solid fa-spell-check"></i>
+              </div>
+              <h3 class="card-title">3. Nommage des Éléments</h3>
+              <p class="card-desc">Contrôle des conventions BPMN (tâches, gateways, événements de début/fin, IDs).</p>
+              <div style="margin-top:auto;"><span class="pill pill-green">Qualité rédactionnelle</span></div>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box purple">
+                <i class="fa-solid fa-table-list"></i>
+              </div>
+              <h3 class="card-title">4. Matrice PMG & Documentation</h3>
+              <p class="card-desc">Process Matrix Governance, lignage de données, export Markdown et dossier technique PDF.</p>
+              <div style="margin-top:auto;"><span class="pill pill-purple">Engineering doc</span></div>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box rose">
+                <i class="fa-solid fa-calculator"></i>
+              </div>
+              <h3 class="card-title">5. Simulateur de ROI</h3>
+              <p class="card-desc">Quantification financière des gains, ETP libérés, heures économisées et Payback period.</p>
+              <div style="margin-top:auto;"><span class="pill pill-orange">Valeur Business</span></div>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box blue">
+                <i class="fa-solid fa-code-pull-request"></i>
+              </div>
+              <h3 class="card-title">6. Comparateur Diff BPMN</h3>
+              <p class="card-desc">Visual Diff entre versions A et B : ajouts, suppressions et modifications en surbrillance.</p>
+              <div style="margin-top:auto;"><span class="pill pill-blue">Revue de version</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 5: Focus Module 1 - Variables & Multi-BPMN -->
+      <section class="slide" data-title="Module 1 : Variables" data-notes="Détailler le moteur multi-BPMN : chargement de 1 à N fichiers en une fois, qualification Write/Read/Ghost, Inspecteur avec timeline XML et export ZIP coordonné.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-cube"></i> Module 1</span>
+            <h2 class="slide-title">Audit des Variables & Moteur Multi-BPMN</h2>
+            <p class="slide-subtitle">Maîtrisez le flux et le cycle de vie des données de bout en bout</p>
+          </div>
+          <img src="img/1.png" alt="Paprika Variables" class="slide-mascot-corner">
+        </div>
+
+        <div class="slide-content">
+          <div class="grid-2">
+            <div class="card">
+              <h3 class="card-title" style="color:var(--paprika-orange-light);"><i class="fa-solid fa-magnifying-glass"></i> Qualification du Cycle de Vie</h3>
+              <ul class="card-list" style="gap: 12px; margin-top: 12px;">
+                <li>
+                  <span class="pill pill-green"><i class="fa-solid fa-pen-to-square"></i> Producteur (Write)</span>
+                  <span>Variable instanciée dans une tâche, formulaire ou <code>outputParameter</code>.</span>
+                </li>
+                <li>
+                  <span class="pill pill-blue"><i class="fa-solid fa-book-open"></i> Consommateur (Read)</span>
+                  <span>Variable lue dans une condition FEEL/JUEL ou <code>inputParameter</code>.</span>
+                </li>
+                <li>
+                  <span class="pill pill-purple"><i class="fa-solid fa-shuffle"></i> Flux In / Out</span>
+                  <span>Variable propagée à travers une <code>callActivity</code> vers un sous-processus.</span>
+                </li>
+                <li>
+                  <span class="pill pill-rose" style="background:rgba(244,63,94,0.15); color:#fb7185;"><i class="fa-solid fa-ghost"></i> Ghost Variable</span>
+                  <span>Variable créée mais jamais lue en aval (inutile, charge mémoire).</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="card">
+              <h3 class="card-title" style="color:#38bdf8;"><i class="fa-solid fa-wand-magic-sparkles"></i> Fonctionnalités Avancées</h3>
+              <ul class="card-list" style="gap: 10px; margin-top: 10px;">
+                <li><i class="fa-solid fa-check"></i> <strong>File Batch Queue Manager :</strong> Import de 1 à 50+ fichiers BPMN simultanément.</li>
+                <li><i class="fa-solid fa-check"></i> <strong>Inspecteur Slide-Over Drawer :</strong> Timeline chronologique avec extraits XML réels en surbrillance.</li>
+                <li><i class="fa-solid fa-check"></i> <strong>Auto-Fix 1-Clic Multi-BPMN :</strong> Renommage standardisé et export d'une archive <code>.zip</code> prête à déployer.</li>
+                <li><i class="fa-solid fa-check"></i> <strong>Export Excel 5-Feuilles :</strong> KPIs, Variables, Hiérarchie, CallActivities, Variables Mortes.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 6: Focus Module 2 - Sous-processus & Hiérarchie -->
+      <section class="slide" data-title="Module 2 : Dépendances" data-notes="Expliquer l'importance de la cartographie des Call Activities : repérer les sous-processus manquants, éviter les boucles infinies et mesurer l'impact de chaque modification.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-cube"></i> Module 2</span>
+            <h2 class="slide-title">Cartographie Hiérarchique & Sous-processus</h2>
+            <p class="slide-subtitle">Visualisation topologique des Call Activities et détection des boucles</p>
+          </div>
+          <img src="img/3.png" alt="Paprika Sous-processus" class="slide-mascot-corner">
+        </div>
+
+        <div class="slide-content">
+          <div class="grid-3">
+            <div class="card">
+              <div class="card-icon-box rose">
+                <i class="fa-solid fa-rotate"></i>
+              </div>
+              <h3 class="card-title">Détection de Boucles</h3>
+              <p class="card-desc">
+                Algorithme DFS (Depth-First Search) pour identifier instantanément les dépendances récursives circulaires critiques.
+              </p>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box blue">
+                <i class="fa-solid fa-network-wired"></i>
+              </div>
+              <h3 class="card-title">3 Modes de Visualisation</h3>
+              <ul class="card-list">
+                <li><i class="fa-solid fa-check"></i> <strong>Arborescence Tree :</strong> Structure parent/enfants.</li>
+                <li><i class="fa-solid fa-check"></i> <strong>Graphe DAG Vis.js :</strong> Topologie orientée.</li>
+                <li><i class="fa-solid fa-check"></i> <strong>Matrice I/O :</strong> Table d'appels & variables.</li>
+              </ul>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box green">
+                <i class="fa-solid fa-bullseye"></i>
+              </div>
+              <h3 class="card-title">Analyse d'Impact</h3>
+              <p class="card-desc">
+                Score de centralité et détection des sous-processus manquants dans le lot (<code>calledElement</code> non fournis).
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 7: Focus Module 3 - Nommage BPMN -->
+      <section class="slide" data-title="Module 3 : Nommage BPMN" data-notes="Présenter les règles d'or de nommage BPMN Bouygues Telecom. Lisibilité maximale pour les métiers et les développeurs.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-cube"></i> Module 3</span>
+            <h2 class="slide-title">Audit des Conventions de Nommage BPMN</h2>
+            <p class="slide-subtitle">Standardisation rigoureuse selon les meilleures pratiques d'ingénierie logicielle</p>
+          </div>
+          <img src="img/1.png" alt="Paprika Nommage" class="slide-mascot-corner">
+        </div>
+
+        <div class="slide-content">
+          <div class="grid-2">
+            <div class="card">
+              <h3 class="card-title" style="color:var(--paprika-orange-light);"><i class="fa-solid fa-list-check"></i> Référentiel des Règles Clés</h3>
+              <ul class="card-list" style="gap: 10px;">
+                <li><span class="pill pill-orange">Tâches</span> <strong>Verbe à l'infinitif + Complément :</strong> <em>« Valider le panier client »</em></li>
+                <li><span class="pill pill-blue">Gateways</span> <strong>Formulation interrogative (?) :</strong> <em>« Client éligible fibre ? »</em></li>
+                <li><span class="pill pill-green">Événement Début</span> <strong>Objet + Participe passé :</strong> <em>« Commande reçue »</em></li>
+                <li><span class="pill pill-purple">Événement Fin</span> <strong>État métier final atteint :</strong> <em>« Dossier clôturé »</em></li>
+                <li><span class="pill pill-orange">Variables</span> <strong>camelCase strict :</strong> <em>« codePostalClient »</em></li>
+              </ul>
+            </div>
+
+            <div class="card">
+              <h3 class="card-title" style="color:#38bdf8;"><i class="fa-solid fa-sliders"></i> Moteur Extensible & Auto-Correction</h3>
+              <ul class="card-list" style="gap: 10px;">
+                <li><i class="fa-solid fa-check"></i> <strong>Règles configurables :</strong> Activation/désactivation et ajout de règles Regex sur-mesure.</li>
+                <li><i class="fa-solid fa-check"></i> <strong>Suggestions intelligentes :</strong> Proposition de renommage conforme en temps réel.</li>
+                <li><i class="fa-solid fa-check"></i> <strong>Édition inline :</strong> Ajustement manuel direct dans la table d'audit.</li>
+                <li><i class="fa-solid fa-check"></i> <strong>Téléchargement BPMN corrigé :</strong> Réécriture du XML prête pour le déploiement.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 8: Focus Module 4 - PMG & Documentation -->
+      <section class="slide" data-title="Module 4 : PMG & Doc" data-notes="La matrice PMG permet de combler le fossé entre le métier et la technique : génération automatique d'un document complet pour l'onboarding et les audits.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-cube"></i> Module 4</span>
+            <h2 class="slide-title">Gouvernance PMG & Documentation Automatisée</h2>
+            <p class="slide-subtitle">Devenez maître de vos processus grâce à la matrice d'ingénierie et au glossaire de données</p>
+          </div>
+          <img src="img/4.png" alt="Paprika PMG" class="slide-mascot-corner">
+        </div>
+
+        <div class="slide-content">
+          <div class="grid-3">
+            <div class="card">
+              <div class="card-icon-box blue">
+                <i class="fa-solid fa-table"></i>
+              </div>
+              <h3 class="card-title">Matrice Interactive</h3>
+              <p class="card-desc">
+                Recensement des pools, lanes, user/service tasks, entrées/sorties et saisie des règles de gestion métier.
+              </p>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box purple">
+                <i class="fa-solid fa-book-bookmark"></i>
+              </div>
+              <h3 class="card-title">Glossaire & Lignage</h3>
+              <p class="card-desc">
+                Inventaire de chaque variable avec identification des tâches productrices (Write) et consommatrices (Read).
+              </p>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box green">
+                <i class="fa-solid fa-file-export"></i>
+              </div>
+              <h3 class="card-title">Génération de Dossier</h3>
+              <p class="card-desc">
+                Génération en 1 clic d'un dossier technique complet exportable en <strong>Markdown</strong> ou <strong>PDF d'onboarding</strong>.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 9: Focus Modules 5 & 6 - ROI & Diff BPMN -->
+      <section class="slide" data-title="Modules 5 & 6 : ROI & Diff" data-notes="Présenter le simulateur économique de ROI pour justifier la valeur auprès du management, et le visual diff pour sécuriser les revues de code entre deux releases.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-chart-line"></i> Modules 5 & 6</span>
+            <h2 class="slide-title">Simulateur de ROI & Comparateur Diff</h2>
+            <p class="slide-subtitle">Démontrez la rentabilité financière et sécurisez chaque montée de version</p>
+          </div>
+          <img src="img/5.png" alt="Paprika Diff" class="slide-mascot-corner">
+        </div>
+
+        <div class="slide-content">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-icon-box rose">
+                <i class="fa-solid fa-coins"></i>
+              </div>
+              <h3 class="card-title">Simulateur de ROI Intégré</h3>
+              <p class="card-desc" style="margin-bottom: 12px;">
+                Permet aux POs et managers de calculer immédiatement les bénéfices économiques de l'optimisation :
+              </p>
+              <ul class="card-list">
+                <li><i class="fa-solid fa-check"></i> Heures de travail économisées par an</li>
+                <li><i class="fa-solid fa-check"></i> Gains financiers nets (€) & ETP libérés</li>
+                <li><i class="fa-solid fa-check"></i> Période de retour sur investissement (Payback)</li>
+                <li><i class="fa-solid fa-check"></i> Export de note de synthèse pour comités de direction</li>
+              </ul>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box blue">
+                <i class="fa-solid fa-code-compare"></i>
+              </div>
+              <h3 class="card-title">Comparateur Diff (Version A vs B)</h3>
+              <p class="card-desc" style="margin-bottom: 12px;">
+                Analyse différentielle fine entre deux versions d'un même diagramme BPMN :
+              </p>
+              <ul class="card-list">
+                <li><span class="pill pill-green"><i class="fa-solid fa-plus"></i> Ajouts :</span> Nouvelles tâches, events, variables</li>
+                <li><span class="pill pill-rose" style="background:rgba(244,63,94,0.15); color:#fb7185;"><i class="fa-solid fa-minus"></i> Suppressions :</span> Éléments retirés ou dépréciés</li>
+                <li><span class="pill pill-orange"><i class="fa-solid fa-pen"></i> Modifications :</span> Libellés, expressions FEEL, I/O</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 10: Expérience Utilisateur & Fonctionnalités Pro -->
+      <section class="slide" data-title="Expérience Utilisateur" data-notes="Mettre en avant l'expérience utilisateur premium : palette de commande Ctrl+K, thèmes clair/sombre/cyberpunk, inspecteur temps réel, exports complets.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-wand-magic-sparkles"></i> Expérience Utilisateur</span>
+            <h2 class="slide-title">Une ergonomie moderne & pensée pour les pros</h2>
+            <p class="slide-subtitle">Rapidité de navigation, raccourcis clavier et design soigné</p>
+          </div>
+          <img src="img/2.png" alt="Paprika Pro" class="slide-mascot-corner">
+        </div>
+
+        <div class="slide-content">
+          <div class="grid-4">
+            <div class="stat-box">
+              <div class="stat-val"><kbd style="font-size:1.3rem;">Ctrl + K</kbd></div>
+              <div class="stat-lbl">Palette de Commandes</div>
+              <p style="font-size:0.75rem; color:#94a3b8; margin-top:6px;">Recherche globale et navigation éclair dans toute l'application</p>
+            </div>
+
+            <div class="stat-box">
+              <div class="stat-val"><i class="fa-solid fa-palette"></i></div>
+              <div class="stat-lbl">Design & Thèmes</div>
+              <p style="font-size:0.75rem; color:#94a3b8; margin-top:6px;">Thème officiel clair & sombre avec mascottes Paprika dynamiques</p>
+            </div>
+
+            <div class="stat-box">
+              <div class="stat-val"><i class="fa-solid fa-file-excel"></i></div>
+              <div class="stat-lbl">Exports Multiples</div>
+              <p style="font-size:0.75rem; color:#94a3b8; margin-top:6px;">Excel 5 feuilles, CSV, JSON, Markdown, PDF, BPMN & ZIP</p>
+            </div>
+
+            <div class="stat-box">
+              <div class="stat-val"><i class="fa-solid fa-bolt-lightning"></i></div>
+              <div class="stat-lbl">Mode Démo Intégré</div>
+              <p style="font-size:0.75rem; color:#94a3b8; margin-top:6px;">Bouton 1-clic pour charger des jeux de données d'exemple</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 11: Bénéfices & Impact Métier -->
+      <section class="slide" data-title="Bénéfices & Valeur" data-notes="Synthétiser les bénéfices concrets : réduction drastique du temps d'audit, fiabilisation des déploiements Camunda, transmission du savoir accélérée.">
+        <div class="slide-header">
+          <div>
+            <span class="slide-meta-tag"><i class="fa-solid fa-trophy"></i> Valeur Ajoutée</span>
+            <h2 class="slide-title">Bénéfices concrets pour les équipes</h2>
+            <p class="slide-subtitle">Un impact direct sur la qualité logicielle et l'efficacité opérationnelle</p>
+          </div>
+          <img src="img/4.png" alt="Paprika Victoire" class="slide-mascot-corner">
+        </div>
+
+        <div class="slide-content">
+          <div class="grid-3">
+            <div class="card">
+              <div class="card-icon-box green">
+                <i class="fa-solid fa-shield-check"></i>
+              </div>
+              <h3 class="card-title">Zéro Incident en Production</h3>
+              <p class="card-desc">
+                Éradication des erreurs d'exécution FEEL/JUEL causées par des variables mal nommées ou orphelines.
+              </p>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box">
+                <i class="fa-solid fa-stopwatch"></i>
+              </div>
+              <h3 class="card-title">Gain de Temps x10</h3>
+              <p class="card-desc">
+                Passage d'audits manuels fastidieux de plusieurs heures à un audit complet et un auto-fix en <strong>quelques secondes</strong>.
+              </p>
+            </div>
+
+            <div class="card">
+              <div class="card-icon-box purple">
+                <i class="fa-solid fa-graduation-cap"></i>
+              </div>
+              <h3 class="card-title">Onboarding Accéléré</h3>
+              <p class="card-desc">
+                Les nouveaux développeurs et architectes appréhendent les chaînes de sous-processus complexes en quelques minutes grâce aux cartographies.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 12: Conclusion & Q&A -->
+      <section class="slide" data-title="Conclusion & Démo" data-notes="Conclure la présentation, proposer une session de questions-réponses et lancer la démonstration live sur l'application index.html.">
+        <img src="img/paprika_logo.png" alt="" class="slide-watermark">
+        <div class="slide-hero">
+          <div class="hero-mascot-wrapper">
+            <img src="img/4.png" alt="Paprika Fin" class="hero-mascot" style="width:120px; height:120px;">
+          </div>
+
+          <h1 class="hero-title" style="font-size:2.8rem;">Merci pour votre attention !</h1>
+          <p class="hero-tagline" style="font-size:1.15rem; margin-bottom:20px;">
+            Place à la démonstration live et à vos questions.
+          </p>
+
+          <div style="background: rgba(30, 41, 59, 0.7); border:1px solid var(--border-color); border-radius:12px; padding:16px 28px; margin-bottom:24px; display:inline-flex; align-items:center; gap:20px;">
+            <div>
+              <span style="font-size:0.8rem; color:#94a3b8; display:block;">Accès à l'application</span>
+              <strong style="color:white; font-family:var(--font-code);">index.html</strong>
+            </div>
+            <div style="width:1px; height:30px; background:var(--border-color);"></div>
+            <div>
+              <span style="font-size:0.8rem; color:#94a3b8; display:block;">Identifiants démo</span>
+              <strong style="color:var(--paprika-orange-light); font-family:var(--font-code);">paprika / paprika</strong>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:12px;">
+            <a href="index.html" class="btn-tool active" style="text-decoration:none; padding:10px 20px; font-size:0.95rem;">
+              <i class="fa-solid fa-play"></i> Lancer Paprika AuditFlow Pro
+            </a>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- Bottom Navigation & Footer Bar -->
+  <footer class="pres-footer">
+    <div class="footer-left">
+      <div class="slide-counter">
+        <span class="current-num" id="current-slide-num">01</span> / <span id="total-slides-num">12</span>
+      </div>
+      <div class="slide-dots" id="slide-dots-container"></div>
+    </div>
+
+    <div class="footer-right">
+      <button class="nav-btn" id="btn-prev" title="Précédent (Flèche gauche / Page Up)">
+        <i class="fa-solid fa-chevron-left"></i>
+      </button>
+      <button class="nav-btn" id="btn-next" title="Suivant (Flèche droite / Espace / Page Down)">
+        <i class="fa-solid fa-chevron-right"></i>
+      </button>
+    </div>
+  </footer>
+
+  <!-- Speaker Notes Drawer -->
+  <div class="speaker-notes-drawer" id="speaker-notes-drawer">
+    <div class="notes-head">
+      <span><i class="fa-solid fa-microphone-lines"></i> Notes de l'orateur</span>
+      <button id="btn-close-notes" style="background:none; border:none; color:white; cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="notes-body" id="speaker-notes-content"></div>
+  </div>
+
+  <!-- Slide Overview Grid Modal -->
+  <div class="overview-modal" id="overview-modal">
+    <div class="overview-header">
+      <h2 class="overview-title"><i class="fa-solid fa-table-cells-large" style="color:var(--paprika-orange-light);"></i> Toutes les Diapositives</h2>
+      <button class="btn-tool" id="btn-close-overview"><i class="fa-solid fa-xmark"></i> Fermer (Esc)</button>
+    </div>
+    <div class="overview-grid" id="overview-grid"></div>
+  </div>
+
+  <!-- Interactive Slide Controller Script -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const slides = Array.from(document.querySelectorAll('.slide'));
+      const totalSlides = slides.length;
+      let currentIndex = 0;
+
+      const currentNumEl = document.getElementById('current-slide-num');
+      const totalNumEl = document.getElementById('total-slides-num');
+      const progressBar = document.getElementById('progress-bar');
+      const dotsContainer = document.getElementById('slide-dots-container');
+      const overviewModal = document.getElementById('overview-modal');
+      const overviewGrid = document.getElementById('overview-grid');
+      const speakerNotesDrawer = document.getElementById('speaker-notes-drawer');
+      const speakerNotesContent = document.getElementById('speaker-notes-content');
+      
+      const btnPrev = document.getElementById('btn-prev');
+      const btnNext = document.getElementById('btn-next');
+      const btnOverview = document.getElementById('btn-overview');
+      const btnCloseOverview = document.getElementById('btn-close-overview');
+      const btnSpeakerNotes = document.getElementById('btn-speaker-notes');
+      const btnCloseNotes = document.getElementById('btn-close-notes');
+      const btnFullscreen = document.getElementById('btn-fullscreen');
+
+      totalNumEl.textContent = totalSlides.toString().padStart(2, '0');
+
+      // Build dots
+      slides.forEach((slide, idx) => {
+        const dot = document.createElement('div');
+        dot.className = `dot ${idx === 0 ? 'active' : ''}`;
+        dot.title = `Slide ${idx + 1}: ${slide.dataset.title || ''}`;
+        dot.addEventListener('click', () => goToSlide(idx));
+        dotsContainer.appendChild(dot);
+
+        // Build overview thumb
+        const thumb = document.createElement('div');
+        thumb.className = `thumb-card ${idx === 0 ? 'active' : ''}`;
+        thumb.innerHTML = `
+          <span class="thumb-num">#${idx + 1}</span>
+          <h4 class="thumb-title">${slide.dataset.title || `Slide ${idx + 1}`}</h4>
+          <p class="thumb-subtitle">${slide.querySelector('.slide-subtitle')?.textContent || slide.querySelector('.hero-tagline')?.textContent || ''}</p>
+        `;
+        thumb.addEventListener('click', () => {
+          goToSlide(idx);
+          closeOverview();
+        });
+        overviewGrid.appendChild(thumb);
+      });
+
+      function updateSlide() {
+        slides.forEach((slide, idx) => {
+          slide.classList.remove('active', 'prev');
+          if (idx === currentIndex) {
+            slide.classList.add('active');
+          } else if (idx < currentIndex) {
+            slide.classList.add('prev');
+          }
+        });
+
+        // Update Counter
+        currentNumEl.textContent = (currentIndex + 1).toString().padStart(2, '0');
+
+        // Update Progress Bar
+        const progress = ((currentIndex + 1) / totalSlides) * 100;
+        progressBar.style.width = `${progress}%`;
+
+        // Update Dots
+        const dots = dotsContainer.querySelectorAll('.dot');
+        dots.forEach((dot, idx) => {
+          dot.classList.toggle('active', idx === currentIndex);
+        });
+
+        // Update Overview Cards
+        const thumbs = overviewGrid.querySelectorAll('.thumb-card');
+        thumbs.forEach((thumb, idx) => {
+          thumb.classList.toggle('active', idx === currentIndex);
+        });
+
+        // Update Speaker Notes
+        const currentSlide = slides[currentIndex];
+        speakerNotesContent.textContent = currentSlide.dataset.notes || 'Aucune note pour cette diapositive.';
+      }
+
+      function goToSlide(index) {
+        if (index >= 0 && index < totalSlides) {
+          currentIndex = index;
+          updateSlide();
+        }
+      }
+
+      function nextSlide() {
+        if (currentIndex < totalSlides - 1) {
+          goToSlide(currentIndex + 1);
+        }
+      }
+
+      function prevSlide() {
+        if (currentIndex > 0) {
+          goToSlide(currentIndex - 1);
+        }
+      }
+
+      function toggleOverview() {
+        overviewModal.classList.toggle('open');
+      }
+
+      function closeOverview() {
+        overviewModal.classList.remove('open');
+      }
+
+      function toggleSpeakerNotes() {
+        speakerNotesDrawer.classList.toggle('open');
+        btnSpeakerNotes.classList.toggle('active');
+      }
+
+      function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+          document.exitFullscreen().catch(() => {});
+        }
+      }
+
+      // Event listeners
+      btnNext.addEventListener('click', nextSlide);
+      btnPrev.addEventListener('click', prevSlide);
+      btnOverview.addEventListener('click', toggleOverview);
+      btnCloseOverview.addEventListener('click', closeOverview);
+      btnSpeakerNotes.addEventListener('click', toggleSpeakerNotes);
+      btnCloseNotes.addEventListener('click', toggleSpeakerNotes);
+      btnFullscreen.addEventListener('click', toggleFullscreen);
+
+      // Keyboard navigation
+      document.addEventListener('keydown', (e) => {
+        if (overviewModal.classList.contains('open')) {
+          if (e.key === 'Escape') closeOverview();
+          return;
+        }
+
+        switch (e.key) {
+          case 'ArrowRight':
+          case 'ArrowDown':
+          case ' ':
+          case 'PageDown':
+            e.preventDefault();
+            nextSlide();
+            break;
+          case 'ArrowLeft':
+          case 'ArrowUp':
+          case 'PageUp':
+            e.preventDefault();
+            prevSlide();
+            break;
+          case 'Home':
+            e.preventDefault();
+            goToSlide(0);
+            break;
+          case 'End':
+            e.preventDefault();
+            goToSlide(totalSlides - 1);
+            break;
+          case 'g':
+          case 'G':
+            toggleOverview();
+            break;
+          case 's':
+          case 'S':
+            toggleSpeakerNotes();
+            break;
+          case 'f':
+          case 'F':
+            toggleFullscreen();
+            break;
+          case 'Escape':
+            closeOverview();
+            speakerNotesDrawer.classList.remove('open');
+            btnSpeakerNotes.classList.remove('active');
+            break;
+        }
+      });
+
+      // Initial state
+      updateSlide();
+    });
+  </script>
+</body>
+</html>
