@@ -2,7 +2,7 @@
  * Paprika AuditFlow Pro - Palette de Commandes & Recherche Globale (Ctrl + K)
  */
 
-(function() {
+(function () {
   let selectedIndex = 0;
   let filteredCommands = [];
 
@@ -18,27 +18,40 @@
     { id: 'nav-dup-table', title: 'Doublons : Vue Tableau Synthétique & Sélection', category: 'Navigation', icon: '📊', action: () => { switchModule('variables'); switchTab('duplicates'); switchDupSubView('table'); } },
     { id: 'nav-dup-graph', title: 'Doublons : Constellation & Graphe Réseau Vis.js', category: 'Navigation', icon: '🕸️', action: () => { switchModule('variables'); switchTab('duplicates'); switchDupSubView('graph'); } },
     { id: 'nav-dup-diff', title: 'Doublons : Comparateur Diff & Contexte', category: 'Navigation', icon: '⚖️', action: () => { switchModule('variables'); switchTab('duplicates'); switchDupSubView('diff'); } },
-    { id: 'nav-bpmn-rules', title: 'Aller à : Audit Nommage BPMN', category: 'Navigation', icon: '📐', action: () => { switchModule('bpmn-rules'); } },
+    { id: 'nav-bpmn-rules', title: 'Aller à : Audit Nommage BPMN', category: 'Navigation', icon: '📐', action: () => { switchModule('bpmn-naming'); } },
+    { id: 'nav-bpmn-lint', title: 'Aller à : Audit Santé BPMN Lint', category: 'Navigation', icon: '✓', action: () => { switchModule('bpmn-lint'); } },
     { id: 'nav-subprocesses', title: 'Aller à : Sous-processus & Boucles', category: 'Navigation', icon: '🔄', action: () => { switchModule('subprocesses'); } },
-    { id: 'nav-pmg', title: 'Aller à : Process Matrix Governance (PMG)', category: 'Navigation', icon: '📑', action: () => { switchModule('pmg'); } },
     { id: 'nav-diff', title: 'Aller à : Comparateur de Versions BPMN (Diff)', category: 'Navigation', icon: '⚖️', action: () => { switchModule('diff'); } },
-    { id: 'nav-roi', title: 'Aller à : Calculateur ROI & Valeur', category: 'Navigation', icon: '💶', action: () => { switchModule('roi'); } },
-    { id: 'nav-guide', title: 'Aller à : Guide d\'utilisation', category: 'Navigation', icon: '📖', action: () => { switchModule('guide'); } },
+    { id: 'nav-tests', title: 'Aller à : Studio de Génération de Tests BPMN', category: 'Navigation', icon: '🧪', action: () => { switchModule('test-gen'); } },
+    { id: 'nav-academy', title: 'Aller à : Paprika Academy & Base de Connaissances', category: 'Navigation', icon: '🎓', action: () => { switchModule('academy'); } },
+    { id: 'nav-academy-studio', title: 'Academy : Atelier Modeler & Exercices Interactifs (Live)', category: 'Academy', icon: '🎮', action: () => { switchModule('academy'); switchAcademySubTab('studio'); } },
+    { id: 'nav-data-catalog', title: 'Aller à : Catalogue de Données Télécom (Data Catalog)', category: 'Navigation', icon: '📖', action: () => { switchModule('data-catalog'); } },
+    { id: 'nav-data-catalog-audit', title: 'Catalogue : Audit BPMN vs Référentiel Central', category: 'Gouvernance', icon: '🔍', action: () => { switchModule('data-catalog'); switchDataCatalogTab('audit'); } },
+    { id: 'nav-data-catalog-add', title: 'Catalogue : Déclarer une Nouvelle Variable Métier', category: 'Gouvernance', icon: '➕', action: () => { switchModule('data-catalog'); openAddVariableModal(); } },
+    { id: 'nav-academy-dosdonts', title: 'Academy : Galerie Do\'s & Don\'ts (Anti-Patterns)', category: 'Academy', icon: '⚖️', action: () => { switchModule('academy'); switchAcademySubTab('dosdonts'); } },
+    { id: 'nav-academy-tracks', title: 'Academy : Parcours de Formation Interactifs', category: 'Academy', icon: '🌱', action: () => { switchModule('academy'); switchAcademySubTab('tracks'); } },
+    { id: 'nav-academy-templates', title: 'Academy : Templates BPMN & Camunda Modeler', category: 'Academy', icon: '🛠️', action: () => { switchModule('academy'); switchAcademySubTab('templates'); } },
+    { id: 'nav-guide', title: 'Aller à : Guide d\'utilisation', category: 'Navigation', icon: '📖', action: () => { switchTab('guide'); } },
+
+    // Sécurité & Espace de Travail Bouygues Telecom
+    { id: 'sec-save-workspace', title: 'Sauvegarder l\'Espace de Travail (.paprika)', category: 'Sécurité & Session', icon: '💾', action: () => { openSecureWorkspaceModal('export'); } },
+    { id: 'sec-load-workspace', title: 'Reprendre un Espace de Travail (.paprika)', category: 'Sécurité & Session', icon: '📂', action: () => { openSecureWorkspaceModal('import'); } },
+    { id: 'sec-view-policy', title: 'Charte de Sécurité & Confidentialité Bouygues Telecom', category: 'Sécurité & Session', icon: '🛡️', action: () => { openSecurityPolicyModal(); } },
+    { id: 'sec-purge-ram', title: '⚠️ Purger la Session & Vider la RAM (Zeroize)', category: 'Sécurité & Session', icon: '🧹', action: () => { purgeSessionAndRAM(); } },
 
     // Actions Rapides
-    { id: 'act-demo', title: 'Charger les Données Démo', category: 'Action Rapide', icon: '⚡', action: () => { loadDemo(); } },
     { id: 'act-harmonize-dup', title: 'Harmoniser Tous les Doublons de Variables', category: 'Action Rapide', icon: '✨', action: () => { applyAllClustersHarmonization(); } },
     { id: 'act-export-dup-report', title: 'Générer le Rapport des Doublons & Cohérence', category: 'Gouvernance', icon: '📊', action: () => { openDuplicatesExportModal(); } },
     { id: 'act-autofix', title: 'Auto-Fix BPMN & Télécharger XML Corrigé', category: 'Action Rapide', icon: '✨', action: () => { applyBpmnAutoFixAndDownload(); } },
-    { id: 'act-export-json', title: 'Exporter le Rapport en JSON', category: 'Action Rapide', icon: '💾', action: () => { exportReport('json'); } },
-    { id: 'act-export-csv', title: 'Exporter le Rapport en CSV', category: 'Action Rapide', icon: '📊', action: () => { exportReport('csv'); } },
+    { id: 'act-export-json', title: 'Exporter le Rapport en JSON', category: 'Action Rapide', icon: '💾', action: () => { exportJSON(); } },
+    { id: 'act-export-csv', title: 'Exporter le Rapport en CSV', category: 'Action Rapide', icon: '📊', action: () => { exportCSV(); } },
     { id: 'act-toggle-sidebar', title: 'Réduire / Agrandir la barre latérale', category: 'Action Rapide', icon: '↔️', action: () => { toggleSidebar(); } },
     { id: 'act-reset', title: 'Réinitialiser toutes les données', category: 'Action Rapide', icon: '🗑️', action: () => { resetAll(); } },
     { id: 'act-export-rules', title: 'Exporter la Configuration des Règles (JSON)', category: 'Gouvernance', icon: '📤', action: () => { exportRulesConfig(); } },
     { id: 'act-import-rules', title: 'Importer une Configuration de Règles (JSON)', category: 'Gouvernance', icon: '📥', action: () => { importRulesConfig(); } }
   ];
 
-  window.openCommandPalette = function() {
+  window.openCommandPalette = function () {
     let modal = document.getElementById('cmdPaletteModal');
     if (!modal) {
       createCommandPaletteModal();
@@ -53,7 +66,7 @@
     }
   };
 
-  window.closeCommandPalette = function() {
+  window.closeCommandPalette = function () {
     const modal = document.getElementById('cmdPaletteModal');
     if (modal) modal.style.display = 'none';
   };
@@ -95,12 +108,12 @@
     const listEl = document.getElementById('cmdPaletteList');
     if (!listEl) return;
 
-    let matches = COMMANDS.filter(cmd => 
+    let matches = COMMANDS.filter(cmd =>
       cmd.title.toLowerCase().includes(q) || cmd.category.toLowerCase().includes(q)
     );
 
     // Recherche dynamique parmi les variables auditées
-    if (q.length >= 2 && window.allRows && allRows.length > 0) {
+    if (q.length >= 2 && typeof allRows !== 'undefined' && allRows.length > 0) {
       const varMatches = allRows
         .filter(r => r.name.toLowerCase().includes(q))
         .slice(0, 5)
@@ -112,10 +125,10 @@
           action: () => {
             switchModule('variables');
             switchTab('results');
-            const searchInput = document.getElementById('search');
+            const searchInput = document.getElementById('searchInput');
             if (searchInput) {
               searchInput.value = r.name;
-              filterTable();
+              onSearch();
             }
           }
         }));
@@ -184,7 +197,7 @@
     });
   }
 
-  window.executeCommandByIndex = function(idx) {
+  window.executeCommandByIndex = function (idx) {
     const cmd = filteredCommands[idx];
     if (cmd && typeof cmd.action === 'function') {
       closeCommandPalette();

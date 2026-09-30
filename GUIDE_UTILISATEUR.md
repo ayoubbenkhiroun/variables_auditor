@@ -31,6 +31,7 @@ La connexion est locale et sécurisée (côté navigateur). Après validation, l
 - **Audit des Variables** : Import, configuration, résultats, dashboard, graphe relationnel, classement, historique.
 - **Sous-processus** : Analyse des Call Activities, détection de boucles circulaires, cartographie.
 - **Nommage BPMN** : Audit des conventions de nommage des éléments BPMN (IDs, tâches, gateways, événements, messages, signaux).
+- **Audit Santé BPMN** : Analyse Lint multi-fichiers, règles équipe, dépendances, score de préparation et rapport exportable.
 - **Module PMG** (Process Matrix Governance) : Cartographie des activités, matrice de gouvernance, glossaire des variables, documentation technique automatisée.
 
 ---
@@ -237,9 +238,44 @@ Le champ de suggestion est éditable pour ajuster la correction proposée.
 
 ---
 
-## 6. Module PMG (Process Matrix Governance)
+## 6. Module Audit Santé BPMN (Lint)
 
-### 6.1 Importation One-Shot BPMN (Parent & Sous-processus)
+Ce module complète l'audit de nommage par des contrôles structurels et des signaux de préparation au déploiement sur un lot de fichiers BPMN.
+
+### 6.1 Importer un lot
+
+Ouvrir **Audit Santé BPMN** puis déposer ou sélectionner un ou plusieurs fichiers `.bpmn` ou `.xml` (25 Mo maximum par fichier). Le nom de fichier doit être unique dans le lot ; une confirmation est demandée pour remplacer un fichier déjà chargé.
+
+### 6.2 Configurer les règles
+
+L'onglet **Règles Lint** propose des contrôles activables par catégorie : structure BPMN et références, dépendances des Call Activities, conventions de nommage, déploiement (processus exécutable, Service Tasks, User Tasks, scripts) et gouvernance. La sévérité se règle par règle : bloquant, erreur, avertissement ou information.
+
+Pour une convention d'équipe, ajouter une règle regex en choisissant un élément BPMN, un attribut, un motif et une sévérité. Les règles sont importables/exportables en JSON. Toute modification de la politique invalide le rapport courant ; relancer l'audit pour recalculer le score.
+
+### 6.3 Lire le rapport & Visualiser les diagrammes BPMN
+
+Cliquer sur **Lancer l'audit complet**. Le rapport présente l'état et le score de chaque fichier, les compteurs de bloquants/erreurs et d'avertissements, une ventilation par domaine et une liste filtrable/recherchable. Le graphe récapitule les racines, les appels, la profondeur, les cibles absentes et les cycles. Les éléments inatteignables et impasses sont signalés.
+
+Chaque anomalie inclut un propriétaire suggéré, une recommandation et une proposition de test de vérification. Ce plan est un point de départ à adapter à votre architecture, à vos rôles et à vos scénarios métier ; ce n'est pas une preuve d'exécution.
+
+### 6.4 Visualisation interactive du BPMN & Localisation des constats
+
+En cliquant sur le nom d'un fichier (ou sur le bouton **👁️ Visualiser**) depuis le tableau d'import ou le rapport de synthèse, une visionneuse interactive BPMN 2.0 s'ouvre en plein écran :
+- **Navigation et Zoom** : Déplacement à la souris, zoom avant/arrière (`+` / `-`) et ajustement automatique (`📐 Ajuster`).
+- **Surlignage en direct des constats** : Les activités, passerelles ou événements en anomalie sont mis en surbrillance avec un badge d'avertissement ou d'erreur directement sur le diagramme.
+- **Volet latéral des constats** : Liste toutes les anomalies du fichier. En cliquant sur une anomalie dans la liste ou dans le tableau du rapport, le canevas zoome et se centre automatiquement sur l'élément en question (`bpmnLintFocusElement`).
+
+### 6.5 Corriger et exporter
+
+**Nettoyer les libellés sûrs** retire uniquement les espaces en bordure des attributs `name` BPMN et exporte une copie ; les originaux restent inchangés. Les corrections de logique ou de sens métier ne sont pas automatisées.
+
+Le rapport se configure depuis **Règles Lint** : choisir HTML, CSV, Excel, JSON ou impression/PDF, puis sélectionner les sections synthèse, fichiers, anomalies et règles actives.
+
+> Le score est heuristique et dépend des règles activées. Un rapport conforme ne certifie pas la mise en production : valider le BPMN avec le moteur Camunda/Zeebe cible, les tests d'intégration et la recette métier.
+
+## 7. Module PMG (Process Matrix Governance)
+
+### 7.1 Importation One-Shot BPMN (Parent & Sous-processus)
 
 Déposez en une seule fois dans la zone de dépôt :
 - Le **processus parent** (orchestrateur racine)
@@ -253,17 +289,17 @@ Déposez en une seule fois dans la zone de dépôt :
 5. **Étape 4 (Variables I/O)** : Extraction des flux de données Zeebe `ioMapping`, Camunda 7 `inputOutput`, `camunda:in`/`out`, formulaires et calcul du lignage de données.
 6. **Étape 5 (Modes & Conditions)** : Déduction automatique des modes de réalisation (`Call Activity`, `Automatique`, `Manuelle`), conditions FEEL sur flux entrants et commentaires de documentation.
 
-### 6.2 Génération de la Matrice (1-Clic ou Pas-à-Pas)
+### 7.2 Génération de la Matrice (1-Clic ou Pas-à-Pas)
 
 - **Génération Directe (1-Clic)** : Cliquez sur le bouton **⚡ Générer la Matrice PMG Directement** dans la carte de synthèse pour basculer instantanément sur le Dashboard d'Étude & Gouvernance et la Matrice.
 - **Vérification Pas-à-Pas (Stepper)** : Vous pouvez naviguer librement dans les 5 étapes pré-remplies pour vérifier, ajuster ou enrichir les informations avant ou après génération.
 - **✨ Démo Multi-BPMN** : Bouton d'accès rapide pour charger une suite complète de 4 processus interconnectés (Orchestration, Risque, Paiement, Expédition).
 
-### 6.3 Informations techniques du processus
+### 7.3 Informations techniques du processus
 
 Toutes les informations extraites et ajustées sont automatiquement persistées en **LocalStorage** avec badge anti-perte de données.
 
-### 6.4 Matrice de gouvernance
+### 7.4 Matrice de gouvernance
 
 Tableau complet listant chaque activité avec :
 - Type de composant (User Task, Service Task, Call Activity...)
@@ -275,7 +311,7 @@ Tableau complet listant chaque activité avec :
 **Filtres :** Recherche, type de composant, entité réalisatrice.  
 **Exports :** CSV, Excel, Impression/PDF.
 
-### 6.5 Étude & Gouvernance (Dashboard PMG)
+### 7.5 Étude & Gouvernance (Dashboard PMG)
 
 #### KPIs
 - **Score de complétude** : Pourcentage d'activités documentées
@@ -322,7 +358,7 @@ Document auto-généré contenant :
 
 ---
 
-## 7. Personnalisation
+## 8. Personnalisation
 
 ### Thèmes visuels
 
@@ -337,7 +373,7 @@ Le thème sélectionné est persisté en LocalStorage.
 
 ---
 
-## 8. Données & Vie privée
+## 9. Données & Vie privée
 
 - **Aucune donnée n'est envoyée à un serveur externe.**
 - **IndexedDB** : Stockage local des historiques d'audit dans le navigateur.
@@ -346,7 +382,7 @@ Le thème sélectionné est persisté en LocalStorage.
 
 ---
 
-## 9. Raccourcis & Astuces
+## 10. Raccourcis & Astuces
 
 - **Charger démo** : Charge 10 variables simulées pour tester l'outil sans fichier.
 - **Copie rapide** : Cliquez sur "Copier" dans la colonne Actions des résultats.
@@ -358,17 +394,18 @@ Le thème sélectionné est persisté en LocalStorage.
 
 ---
 
-## 10. Formats de fichiers supportés
+## 11. Formats de fichiers supportés
 
 | Extension | Type | Module |
 |-----------|------|--------|
 | `.xlsx` / `.xls` | Excel | Variables, Sous-processus |
 | `.csv` | CSV | Variables, Sous-processus |
 | `.bpmn` / `.xml` | BPMN/XML | Variables, Sous-processus, Nommage BPMN, PMG |
+| `.bpmn` / `.xml` | BPMN/XML | Audit Santé BPMN (multi-fichiers) |
 
 ---
 
-## 11. Export disponibles
+## 12. Export disponibles
 
 | Export | Modules concernés |
 |--------|-------------------|
@@ -382,6 +419,7 @@ Le thème sélectionné est persisté en LocalStorage.
 | Impression / PDF Matrice | PMG |
 | Guide technique Markdown | PMG |
 | Guide technique PDF | PMG |
+| Rapport de santé HTML / CSV / Excel / JSON / PDF | Audit Santé BPMN |
 
 ---
 

@@ -9,7 +9,6 @@ const ASSETS_TO_CACHE = [
   './js/rules.js',
   './js/bpmn_rules.js',
   './js/pmg.js',
-  './js/roi.js',
   './js/diff.js',
   './js/autofix.js',
   './js/cmd_palette.js',

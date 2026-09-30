@@ -14,7 +14,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false // Permet le chargement aisé des fichiers locaux et blobs
+      webSecurity: true
     },
     autoHideMenuBar: true,
     show: false

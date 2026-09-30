@@ -14,7 +14,7 @@ window.setOriginalBpmnSource = function(xmlString, fileName) {
 };
 
 // Moteur d'Auto-Fix 1-Clic
-window.applyBpmnAutoFixAndDownload = function() {
+window.applyLegacyBpmnAutoFixAndDownload = function() {
   if (!originalBpmnXml) {
     if (rawFileData && rawFileData.length > 0 && isBPMNMode) {
       // Si on a les données brutes

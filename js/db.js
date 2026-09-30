@@ -1,59 +1,33 @@
-// ---------- Configuration DB IndexedDB ----------
-const DB_NAME = "CamundaAuditorDB";
-const STORE_NAME = "history";
-let dbInstance;
+// ---------- Store In-Memory Sécurisé (Zéro Persistance Disque) ----------
+// Spécifique Bouygues Telecom : les historiques ne résident que dans la RAM de la session courante
+
+let inMemoryHistory = [];
 
 function initDB() {
-  return new Promise((resolve, reject) => {
-    if(dbInstance) return resolve(dbInstance);
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = e => {
-      const db = e.target.result;
-      if(!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, {keyPath: 'id'});
-      }
-    };
-    req.onsuccess = e => { dbInstance = e.target.result; resolve(dbInstance); };
-    req.onerror = e => reject(e.target.error);
-  });
+  return Promise.resolve(inMemoryHistory);
 }
 
 async function dbSave(item) {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).put(item);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  const existingIdx = inMemoryHistory.findIndex(x => x.id === item.id);
+  if (existingIdx >= 0) {
+    inMemoryHistory[existingIdx] = item;
+  } else {
+    inMemoryHistory.unshift(item);
+  }
+  return Promise.resolve();
 }
 
 async function dbLoadAll() {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const req = tx.objectStore(STORE_NAME).getAll();
-    req.onsuccess = () => resolve(req.result.sort((a,b)=>b.id-a.id));
-    req.onerror = () => reject(tx.error);
-  });
+  return Promise.resolve([...inMemoryHistory].sort((a, b) => b.id - a.id));
 }
 
 async function dbDelete(id) {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  inMemoryHistory = inMemoryHistory.filter(x => x.id !== id);
+  return Promise.resolve();
 }
 
 async function dbClear() {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).clear();
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  inMemoryHistory = [];
+  return Promise.resolve();
 }
+

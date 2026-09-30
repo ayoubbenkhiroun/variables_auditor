@@ -13,13 +13,14 @@
 ## 📑 Sommaire
 
 1. [🌟 Points Forts & Architecture](#-points-forts--architecture)
-2. [🧭 Les 6 Modules de la Suite](#-les-6-modules-de-la-suite)
+2. [🧭 Les 7 Modules de la Suite](#-les-7-modules-de-la-suite)
    - [Module 1 : Audit des Variables & Multi-BPMN (1 à n Fichiers)](#1-module-audit-des-variables--multi-bpmn-1-à-n-fichiers)
    - [Module 2 : Analyse des Sous-processus & Dépendances](#2-module-analyse-des-sous-processus--dépendances)
    - [Module 3 : Audit de Nommage des Éléments BPMN](#3-module-audit-de-nommage-des-éléments-bpmn)
    - [Module 4 : Gouvernance & Matrice PMG (Process Matrix Governance)](#4-module-gouvernance--matrice-pmg-process-matrix-governance)
    - [Module 5 : Simulateur de ROI & Gain de Temps](#5-module-simulateur-de-roi--gain-de-temps)
    - [Module 6 : Comparateur de Versions BPMN (Visual Diff)](#6-module-comparateur-de-versions-bpmn-visual-diff)
+   - [Module 7 : Audit Santé BPMN (Lint de préparation)](#7-module-audit-santé-bpmn-lint-de-préparation)
 3. [📋 Référentiel des Règles de Nommage & Conformité](#-référentiel-des-règles-de-nommage--conformité)
 4. [🛠️ Guide d'Utilisation Étape par Étape](#️-guide-dutilisation-étape-par-étape)
 5. [📦 Formats d'Exportation & Rapports](#-formats-dexportation--rapports)
@@ -40,7 +41,7 @@
 
 ---
 
-## 🧭 Les 6 Modules de la Suite
+## 🧭 Les 7 Modules de la Suite
 
 ```mermaid
 graph TD
@@ -50,6 +51,7 @@ graph TD
     A --> M4[4. Gouvernance & Matrice PMG]
     A --> M5[5. Simulateur de ROI]
     A --> M6[6. Comparateur Diff BPMN]
+   A --> M7[7. Audit Santé BPMN Lint]
 
     M1 --> M1_1[Import 1 à n BPMN]
     M1 --> M1_2[Relations & Hiérarchie]
@@ -149,6 +151,22 @@ Facilite la revue de code et l'analyse d'impact lors des montées de version :
 
 ---
 
+### 7. Module : Audit Santé BPMN (Lint de préparation)
+
+Audit statique d'un ou plusieurs BPMN avant les tests moteur, les tests d'intégration et la revue métier. L'import est local et accepte `.bpmn` et `.xml` (25 Mo maximum par fichier).
+
+- **Structure et références** : racine et namespace BPMN 2.0, IDs manquants ou dupliqués, unicité des événements de début None, conformité des sous-processus événementiels (début typé sans flux traversant), collisions d'IDs de processus dans le lot, références source/target des flux, événements de début/fin, événements de bordure et références de lanes.
+- **Graphe de dépendances & Modélisation** : racines, profondeur, cibles absentes et cycles entre Call Activities ; détection des éléments inatteignables, des impasses de flux, interdiction des conditions sur passerelles parallèles (AND), détection de branche par défaut sur passerelles exclusives (XOR), passerelles mixtes (Split/Join) et flux conditionnels hors passerelle.
+- **Déploiement et exécution** : `isExecutable`, implémentation des Service Tasks, affectation des User Tasks, contenu des Script Tasks, définitions temporelles des Timers (ISO 8601/FEEL), codes d'erreur sur Error Events, références de messages sur Message Events et couverture des lanes.
+- **Nommage et lisibilité** : libellés obligatoires, questions de passerelles, branches explicites, verbes d'action à l'infinitif pour les tâches, phrases nominales pour les sous-processus, état métier final pour les fins, et camelCase des variables dans les paramètres I/O, FEEL et JUEL.
+- **Règles équipe** : sévérité configurable (bloquant, erreur, avertissement, information), activation individuelle et règles regex personnalisées par type d'élément et attribut.
+- **Rapport de remédiation** : état et score par fichier, ventilation par domaine, filtres et recherche. Chaque anomalie suggère un responsable, une action et un scénario de test métier. Exports HTML, CSV, Excel, JSON ou impression/PDF avec sections sélectionnables ; les règles sont importables/exportables en JSON.
+- **Auto-Fix prudent** : nettoyage des espaces en bordure des libellés BPMN dans des copies corrigées (ZIP pour plusieurs fichiers) ; les originaux sont conservés et les corrections sémantiques restent manuelles.
+
+> Le score est un indicateur heuristique des règles actives, pas une garantie de mise en production sans incident. L'audit statique ne remplace ni la validation sur le moteur Camunda/Zeebe cible, ni les tests d'intégration, de charge, de sécurité ou la recette métier.
+
+---
+
 ## 📋 Référentiel des Règles de Nommage & Conformité
 
 L'audit syntaxique et sémantique s'appuie sur le référentiel de règles suivant :
@@ -212,6 +230,7 @@ L'audit syntaxique et sémantique s'appuie sur le référentiel de règles suiva
 | 📊 **Excel** | `camunda_audit_variables_complet.xlsx` | 5 feuilles : *Synthèse KPIs*, *Audit Variables*, *Hiérarchie*, *CallActivities & I/O*, *Variables Mortes*. |
 | 📑 **CSV** | `camunda_variables_rapport.csv` | Données tabulaires brutes de l'audit avec métadonnées de gouvernance. |
 | 📝 **Markdown** | `documentation_technique_pmg.md` | Dossier technique complet du module PMG avec dictionnaire de données et checklist. |
+| 📋 **Rapport Lint** | HTML, CSV, Excel, JSON ou impression/PDF | Score et état par fichier, anomalies détaillées et règles équipe sélectionnées. |
 | 💾 **JSON** | `camunda_auditflow_backup.json` | Sauvegarde complète de la base locale IndexedDB et de l'historique des audits. |
 
 ---
@@ -261,6 +280,7 @@ variables_auditor/
 │   ├── app.js                   # Moteur principal (Multi-BPMN, routage, analyse, UI, ZIP/Excel)
 │   ├── rules.js                 # Définition des règles syntaxiques et utilitaires de nommage
 │   ├── bpmn_rules.js            # Règles d'audit de modélisation BPMN (Tâches, Événements, Passerelles)
+│   ├── bpmn_lint.js             # Audit santé multi-BPMN, règles Lint et exports de rapports
 │   ├── pmg.js                   # Moteur du module PMG (Gouvernance, complexité, documentation)
 │   └── db.js                    # Gestionnaire de persistance locale IndexedDB
 ├── img/                         # Logos, icônes et chartes graphiques

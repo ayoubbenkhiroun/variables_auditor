@@ -121,7 +121,7 @@ let selectedVarForInspection = null;
 let procNetworkGraph = null;
 
 // ---------- Module & Subprocess State Variables ----------
-let currentModule = 'variables'; // 'variables', 'subprocesses', 'bpmn-naming' or 'pmg'
+let currentModule = 'variables'; // 'variables', 'subprocesses', 'bpmn-naming', 'bpmn-lint', 'pmg', 'roi' or 'diff'
 let allSubprocessRows = [];
 let filteredSubprocessRows = [];
 let rawSubprocessFileData = [];
@@ -312,6 +312,7 @@ async function analyze(){
     label: isBPMNMode ? (bpmnBatch.length > 1 ? `${bpmnBatch.length} fichiers BPMN` : bpmnFileName) : rawFileData.length ? document.getElementById('uploadTitle').textContent : 'Saisie manuelle',
     isBPMNMode: isBPMNMode,
     bpmnXmlText: isBPMNMode && bpmnXmlDoc ? new XMLSerializer().serializeToString(bpmnXmlDoc) : null,
+    bpmnFiles: isBPMNMode ? bpmnBatch.map(b => ({ fileName: b.fileName, rawXml: b.rawXml })) : null,
     bpmnFileName: isBPMNMode ? bpmnFileName : null,
     allRows: JSON.parse(JSON.stringify(allRows))
   };
@@ -1959,11 +1960,25 @@ function loadHistoryItem(id) {
 
   isBPMNMode = !!item.isBPMNMode;
   bpmnFileName = item.bpmnFileName || "";
-  if (isBPMNMode && item.bpmnXmlText) {
-    const parser = new DOMParser();
-    bpmnXmlDoc = parser.parseFromString(item.bpmnXmlText, "application/xml");
+  bpmnBatch = [];
+  bpmnXmlDoc = null;
+  const savedBpmnFiles = Array.isArray(item.bpmnFiles) && item.bpmnFiles.length
+    ? item.bpmnFiles
+    : (isBPMNMode && item.bpmnXmlText ? [{ fileName: bpmnFileName || 'process.bpmn', rawXml: item.bpmnXmlText }] : []);
+
+  if (isBPMNMode && savedBpmnFiles.length) {
+    bpmnBatch = savedBpmnFiles.map(file => parseSingleBpmnDoc(file.rawXml, file.fileName));
+    updateBpmnBatchState();
+
+    const savedRowsBySource = new Map(allRows.map(row => [JSON.stringify([row.fileName, row.row]), row]));
+    allRows = bpmnRows.map(row => ({
+      ...row,
+      ...(savedRowsBySource.get(JSON.stringify([row.fileName, row.row])) || {}),
+      bpmnMeta: row.bpmnMeta
+    }));
+    bpmnRows = allRows;
   } else {
-    bpmnXmlDoc = null;
+    bpmnFileName = isBPMNMode ? bpmnFileName : '';
   }
 
   currentFilter='all';searchVal='';currentSort={key:'status',dir:1};currentPage=1;
@@ -1974,7 +1989,14 @@ function loadHistoryItem(id) {
   document.getElementById('resetBtn').style.display='';
 
   const bpmnBtn = document.getElementById('downloadBpmnBtn');
-  if (bpmnBtn) bpmnBtn.style.display = isBPMNMode ? 'inline-block' : 'none';
+  if (bpmnBtn) {
+    bpmnBtn.style.display = isBPMNMode && bpmnBatch.length > 0 ? 'inline-block' : 'none';
+    bpmnBtn.textContent = bpmnBatch.length > 1 ? '📦 Auto-Fix & Télécharger Pack ZIP' : '✨ Auto-Fix & Exporter BPMN';
+  }
+
+  const procRelTab = document.getElementById('procRelTab');
+  if (procRelTab) procRelTab.style.display = isBPMNMode && bpmnBatch.length > 0 ? '' : 'none';
+  if (isBPMNMode && bpmnBatch.length > 0) renderProcessHierarchy();
 
   initGraphFilters();
   resetDashboardFilters();
@@ -2088,12 +2110,16 @@ function switchTab(name, skipLoader = false){
     'bpmn-naming-import': 'Importation du BPMN (Nommage)',
     'bpmn-naming-config': 'Configuration des Règles de Nommage',
     'bpmn-naming-results': 'Rapport d\'Audit de Nommage BPMN',
+    'bpmn-lint-import': 'Audit Santé BPMN — Import & Analyse',
+    'bpmn-lint-rules': 'Audit Santé BPMN — Règles Lint',
+    'bpmn-lint-results': 'Audit Santé BPMN — Rapport de Santé',
     'pmg-import': 'Importation du BPMN (PMG)',
     'pmg-dashboard': 'Étude & Gouvernance PMG',
     'pmg-matrix': 'Matrice des Activités PMG',
-    'roi-calculator': 'Calculateur de ROI & Gain de Temps',
-    'roi-config': 'Configuration du Calculateur ROI',
     'diff': 'Comparateur de Versions BPMN (Diff)',
+    'test-gen': 'Studio de Génération de Tests BPMN & Scénarios',
+    'academy': 'Paprika Academy — Hub de Modélisation & Bonnes Pratiques',
+    'data-catalog': 'Dictionnaire d\'Entreprise & Catalogue de Données (Data Catalog)',
     'guide': 'Guide d\'utilisation'
   };
 
@@ -2108,29 +2134,22 @@ function switchTab(name, skipLoader = false){
     const panel = document.getElementById('panel-'+name);
     if(panel) panel.classList.add('active');
 
-    // Gérer l'état actif du menu latéral pour le guide d'utilisation et le comparateur
-    if (name === 'guide') {
-      document.querySelectorAll('.menu-header').forEach(h => {
-        if (h.id === 'btn-mod-guide') {
-          h.classList.add('active');
-        } else if (!h.closest('#group-guide')) {
-          h.classList.remove('active');
-        }
-      });
-    } else if (name === 'diff') {
-      document.querySelectorAll('.menu-header').forEach(h => {
-        if (h.id === 'btn-mod-diff') {
-          h.classList.add('active');
-        } else if (!h.closest('#group-diff')) {
-          h.classList.remove('active');
-        }
-      });
-    } else {
-      const guideHeader = document.getElementById('btn-mod-guide');
-      if (guideHeader) guideHeader.classList.remove('active');
-      const diffHeader = document.getElementById('btn-mod-diff');
-      if (diffHeader) diffHeader.classList.remove('active');
-    }
+    // Gérer l'état actif du menu latéral pour les modules autonomes
+    const singleMenuMap = {
+      'guide': 'btn-mod-guide',
+      'diff': 'btn-mod-diff',
+      'test-gen': 'btn-mod-tests',
+      'academy': 'btn-mod-academy',
+      'data-catalog': 'btn-mod-data-catalog'
+    };
+
+    Object.keys(singleMenuMap).forEach(key => {
+      const btnId = singleMenuMap[key];
+      const btn = document.getElementById(btnId);
+      if (btn) {
+        btn.classList.toggle('active', name === key);
+      }
+    });
 
     // Mise à jour dynamique du titre dans l'en-tête principal
     const pageTitleEl = document.getElementById('pageTitle');
@@ -2141,6 +2160,8 @@ function switchTab(name, skipLoader = false){
     // Gérer le déclenchement de rendu spécifique selon l'onglet
     if (name === 'duplicates') {
       renderDuplicatesUI();
+    } else if (name === 'test-gen') {
+      if (typeof initTestGenModule === 'function') initTestGenModule();
     }
   };
 
@@ -3417,6 +3438,47 @@ async function applyBpmnAutoFixAndDownload() {
   a.click();
 }
 
+function exportCSV() {
+  if (allRows.length === 0) {
+    alert('Aucun résultat à exporter.');
+    return;
+  }
+
+  const rows = [
+    ['Variable originale', 'Statut', 'Problèmes', 'Suggestion', 'Rôle', 'Processus parent', 'Processus appelant', 'Fichier', 'Sensibilité', 'Équipe'],
+    ...allRows.map(row => [
+      row.name,
+      row.status === 'valid' ? 'Conforme' : row.status === 'warn' ? 'Avertissement' : 'Non conforme',
+      (row.issues || []).map(issue => issue.msg).join('; '),
+      row.editedSuggestion || row.suggested || '',
+      getLifecycleLabel(row.role),
+      row.parentProcess || '',
+      row.callingProcess || '',
+      row.fileName || '',
+      row.sensitivity || 'Public',
+      row.team || 'Non assignée'
+    ])
+  ];
+
+  const csv = rows.map(row => row.map(qq).join(',')).join('\r\n');
+  dl('\uFEFF' + csv, 'camunda_audit_variables.csv', 'text/csv;charset=utf-8;');
+}
+
+function exportJSON() {
+  if (allRows.length === 0) {
+    alert('Aucun résultat à exporter.');
+    return;
+  }
+
+  const report = {
+    appName: 'AuditFlow Pro',
+    exportedAt: new Date().toISOString(),
+    count: allRows.length,
+    rows: allRows.map(({ bpmnMeta, ...row }) => row)
+  };
+  dl(JSON.stringify(report, null, 2), 'camunda_audit_variables.json', 'application/json;charset=utf-8;');
+}
+
 // ---------- Multi-Sheet Excel Export ----------
 function exportExcel() {
   if (!window.XLSX) { alert('Bibliothèque XLSX non chargée'); return; }
@@ -3545,33 +3607,6 @@ function exportExcel() {
   XLSX.writeFile(wb, 'camunda_audit_variables_complet.xlsx');
 }
 
-// ---------- Démo Données (Excel / Saisie avec Doublons et Variations) ----------
-function loadDemo() {
-  const demoVars = [
-    'customerId', 'customer_id', 'CustomerId', 'idClient', 'client_id',
-    'orderAmount', 'OrderAmount', 'order_amount',
-    'Xnodes', 'xnodes', 'x_nodes',
-    'InvoiceNumber', 'invoice_number', 'invoiceNbr',
-    'user_email', 'userEmail', 'UserEmail',
-    'processInstanceKey', 'prénom_client', '2ndStep', 'statut_validation'
-  ];
-  document.getElementById('manualInput').value = demoVars.join('\n');
-  rawFileData = [];
-  fileHeaders = [];
-  isBPMNMode = false;
-  bpmnRows = [];
-  bpmnBatch = [];
-  bpmnXmlDoc = null;
-  bpmnFileName = "";
-  document.getElementById('uploadTitle').textContent = 'Données Démo (20 variables avec doublons et variations)';
-  document.getElementById('uploadSub').textContent = 'Exemples variés de conventions, casses et doublons sémantiques prêts à analyser';
-  document.getElementById('mappingSection').style.display = 'none';
-  const batchSec = document.getElementById('bpmnBatchSection');
-  if (batchSec) batchSec.style.display = 'none';
-  analyze();
-}
-window.loadDemo = loadDemo;
-
 // ---------- Réinitialisation Globale ----------
 function resetAll() {
   allRows = [];
@@ -3613,139 +3648,6 @@ function resetAll() {
   switchTab('import');
 }
 window.resetAll = resetAll;
-
-// ---------- Démo Multi-BPMN (4 Processus Reliés) ----------
-function loadDemoMultiBpmn() {
-  const demoBPMN1 = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" id="Def_Order" targetNamespace="http://bpmn.io/schema/bpmn">
-  <bpmn:process id="Process_Commande_Client" name="1. Orchestration Commande Client" isExecutable="true">
-    <bpmn:extensionElements>
-      <zeebe:properties>
-        <zeebe:property key="global_order_timeout" value="48h" />
-      </zeebe:properties>
-    </bpmn:extensionElements>
-    <bpmn:startEvent id="Start_1" name="Commande Reçue" />
-    <bpmn:serviceTask id="Task_InitOrder" name="Initialiser Panier">
-      <bpmn:extensionElements>
-        <zeebe:ioMapping>
-          <zeebe:input source="= raw_payload.customer_id" target="idClient" />
-          <zeebe:output source="= order_total_amount" target="montantCommande" />
-        </zeebe:ioMapping>
-      </bpmn:extensionElements>
-    </bpmn:serviceTask>
-    <bpmn:callActivity id="Call_Risk" name="Évaluer Risque Financier" calledElement="Process_Evaluation_Risque">
-      <bpmn:extensionElements>
-        <zeebe:ioMapping>
-          <zeebe:input source="= montantCommande" target="montantAControler" />
-          <zeebe:input source="= idClient" target="identifiantClient" />
-          <zeebe:output source="= decision_score_final" target="decisionRisque" />
-        </zeebe:ioMapping>
-      </bpmn:extensionElements>
-    </bpmn:callActivity>
-    <bpmn:callActivity id="Call_Payment" name="Encaisser Paiement" calledElement="Process_Paiement_Facturation">
-      <bpmn:extensionElements>
-        <zeebe:ioMapping>
-          <zeebe:input source="= montantCommande" target="montantAPayer" />
-          <zeebe:input source="= idClient" target="refClient" />
-          <zeebe:output source="= ref_transaction" target="referenceTransaction" />
-        </zeebe:ioMapping>
-      </bpmn:extensionElements>
-    </bpmn:callActivity>
-    <bpmn:callActivity id="Call_Shipping" name="Expédier Commande" calledElement="Process_Expedition_Livraison">
-      <bpmn:extensionElements>
-        <zeebe:ioMapping>
-          <zeebe:input source="= idClient" target="destinataireId" />
-          <zeebe:output source="= tracking_code" target="numeroSuiviColis" />
-        </zeebe:ioMapping>
-      </bpmn:extensionElements>
-    </bpmn:callActivity>
-    <bpmn:callActivity id="Call_ExternalAudit" name="Audit Externe (Non Fourni)" calledElement="Process_Audit_Externe_Tiers" />
-    <bpmn:endEvent id="End_1" name="Commande Clôturée" />
-  </bpmn:process>
-</bpmn:definitions>`;
-
-  const demoBPMN2 = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" id="Def_Risk" targetNamespace="http://bpmn.io/schema/bpmn">
-  <bpmn:process id="Process_Evaluation_Risque" name="2. Sous-processus Évaluation Risque" isExecutable="true">
-    <bpmn:startEvent id="Start_Risk" />
-    <bpmn:serviceTask id="Task_CheckCredit" name="Consulter Banque de France">
-      <bpmn:extensionElements>
-        <camunda:inputOutput>
-          <camunda:inputParameter name="client_id_param">\${identifiantClient}</camunda:inputParameter>
-          <camunda:outputParameter name="score_bdf">\${scoreCredit}</camunda:outputParameter>
-        </camunda:inputOutput>
-      </bpmn:extensionElements>
-    </bpmn:serviceTask>
-    <bpmn:userTask id="Task_ManualReview" name="Revue Manuelle Risque">
-      <bpmn:extensionElements>
-        <camunda:formData>
-          <camunda:formField id="avis_analyste_risques" type="string" />
-        </camunda:formData>
-      </bpmn:extensionElements>
-    </bpmn:userTask>
-    <bpmn:endEvent id="End_Risk" />
-  </bpmn:process>
-</bpmn:definitions>`;
-
-  const demoBPMN3 = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" id="Def_Pay" targetNamespace="http://bpmn.io/schema/bpmn">
-  <bpmn:process id="Process_Paiement_Facturation" name="3. Sous-processus Paiement &amp; Facturation" isExecutable="true">
-    <bpmn:startEvent id="Start_Pay" />
-    <bpmn:serviceTask id="Task_ChargeCard" name="Débiter Carte Bancaire">
-      <bpmn:extensionElements>
-        <zeebe:ioMapping>
-          <zeebe:input source="= montantAPayer" target="amountToCharge" />
-          <zeebe:output source="= payment_auth_token" target="tokenPaiement" />
-          <zeebe:output source="= unused_debug_payload" target="debugGhostVar" />
-        </zeebe:ioMapping>
-      </bpmn:extensionElements>
-    </bpmn:serviceTask>
-    <bpmn:serviceTask id="Task_GenerateInvoice" name="Générer Facture PDF">
-      <bpmn:extensionElements>
-        <zeebe:ioMapping>
-          <zeebe:input source="= tokenPaiement" target="authConfirm" />
-          <zeebe:output source="= pdf_url" target="urlFacture" />
-        </zeebe:ioMapping>
-      </bpmn:extensionElements>
-    </bpmn:serviceTask>
-    <bpmn:endEvent id="End_Pay" />
-  </bpmn:process>
-</bpmn:definitions>`;
-
-  const demoBPMN4 = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" id="Def_Ship" targetNamespace="http://bpmn.io/schema/bpmn">
-  <bpmn:process id="Process_Expedition_Livraison" name="4. Sous-processus Expédition &amp; Livraison" isExecutable="true">
-    <bpmn:startEvent id="Start_Ship" />
-    <bpmn:serviceTask id="Task_PreparePackage" name="Préparer Colis Entrepôt">
-      <bpmn:extensionElements>
-        <zeebe:ioMapping>
-          <zeebe:input source="= destinataireId" target="customerId" />
-          <zeebe:output source="= warehouse_bin" target="emplacementStock" />
-        </zeebe:ioMapping>
-      </bpmn:extensionElements>
-    </bpmn:serviceTask>
-    <bpmn:serviceTask id="Task_NotifyCarrier" name="Informer Transporteur">
-      <bpmn:extensionElements>
-        <zeebe:ioMapping>
-          <zeebe:input source="= emplacementStock" target="binLocation" />
-          <zeebe:output source="= carrier_name" target="transporteurNom" />
-        </zeebe:ioMapping>
-      </bpmn:extensionElements>
-    </bpmn:serviceTask>
-    <bpmn:endEvent id="End_Ship" />
-  </bpmn:process>
-</bpmn:definitions>`;
-
-  bpmnBatch = [
-    parseSingleBpmnDoc(demoBPMN1, 'Process_Commande_Client.bpmn'),
-    parseSingleBpmnDoc(demoBPMN2, 'Process_Evaluation_Risque.bpmn'),
-    parseSingleBpmnDoc(demoBPMN3, 'Process_Paiement_Facturation.bpmn'),
-    parseSingleBpmnDoc(demoBPMN4, 'Process_Expedition_Livraison.bpmn')
-  ];
-
-  updateBpmnBatchState();
-  analyze();
-}
 
 // ---------- Classement d'utilisation des variables ----------
 function computeRankingData() {
@@ -4957,7 +4859,11 @@ function checkAuth() {
   if (isValid) {
     if (loginScreen) loginScreen.style.display = 'none';
     if (appContainer) appContainer.style.display = 'flex';
-    switchModule(currentModule);
+    if (typeof window.switchModule === 'function') {
+      window.switchModule(currentModule);
+    } else {
+      setTimeout(() => window.switchModule?.(currentModule), 0);
+    }
   } else {
     if (loginScreen) loginScreen.style.display = 'flex';
     if (appContainer) appContainer.style.display = 'none';
@@ -4983,10 +4889,15 @@ window.handleLogin = function(e) {
   const pass = (document.getElementById('loginPass').value || '').trim();
 
   // Comptes autorisés pour l'environnement d'audit
-  const validUsers = ['bouygues', 'admin', 'paprika', 'pdacamunda', 'user'];
-  const validPass = ['bouygues', 'admin', 'paprika', 'pdacamunda'];
+  const credentials = {
+    bouygues: 'bouygues',
+    admin: 'admin',
+    paprika: 'paprika',
+    pdacamunda: 'pdacamunda',
+    user: 'user'
+  };
 
-  if (validUsers.includes(user) && (validPass.includes(pass) || pass === user)) {
+  if (credentials[user] === pass) {
     failedLoginAttempts = 0;
     sessionStorage.setItem('pda_camunda_session', 'true');
     sessionStorage.setItem('pda_session_time', Date.now().toString());
@@ -5024,20 +4935,28 @@ window.handleLogout = function() {
 
 window.switchModule = function(moduleName) {
   currentModule = moduleName;
+  document.body.classList.toggle('bpmn-lint-mobile', moduleName === 'bpmn-lint' && window.innerWidth <= 720);
   
   // Mettre à jour les boutons du sélecteur (en-têtes de catégorie)
   const btnVars = document.getElementById('btn-mod-variables');
   const btnSubs = document.getElementById('btn-mod-subprocesses');
   const btnBpmn = document.getElementById('btn-mod-bpmn-naming');
+  const btnBpmnLint = document.getElementById('btn-mod-bpmn-lint');
   const btnPmg = document.getElementById('btn-mod-pmg');
-  const btnRoi = document.getElementById('btn-mod-roi');
   const btnDiff = document.getElementById('btn-mod-diff');
+  const btnTests = document.getElementById('btn-mod-tests');
+  const btnAcademy = document.getElementById('btn-mod-academy');
+  const btnDataCatalog = document.getElementById('btn-mod-data-catalog');
+
   if (btnVars) btnVars.classList.toggle('active', moduleName === 'variables');
   if (btnSubs) btnSubs.classList.toggle('active', moduleName === 'subprocesses');
   if (btnBpmn) btnBpmn.classList.toggle('active', moduleName === 'bpmn-naming');
+  if (btnBpmnLint) btnBpmnLint.classList.toggle('active', moduleName === 'bpmn-lint');
   if (btnPmg) btnPmg.classList.toggle('active', moduleName === 'pmg');
-  if (btnRoi) btnRoi.classList.toggle('active', moduleName === 'roi');
   if (btnDiff) btnDiff.classList.toggle('active', moduleName === 'diff');
+  if (btnTests) btnTests.classList.toggle('active', moduleName === 'test-gen');
+  if (btnAcademy) btnAcademy.classList.toggle('active', moduleName === 'academy');
+  if (btnDataCatalog) btnDataCatalog.classList.toggle('active', moduleName === 'data-catalog');
   const guideHeader = document.getElementById('btn-mod-guide');
   if (guideHeader) guideHeader.classList.remove('active');
 
@@ -5045,15 +4964,22 @@ window.switchModule = function(moduleName) {
   const groupVars = document.getElementById('group-variables');
   const groupSubs = document.getElementById('group-subprocesses');
   const groupBpmn = document.getElementById('group-bpmn-naming');
+  const groupBpmnLint = document.getElementById('group-bpmn-lint');
   const groupPmg = document.getElementById('group-pmg');
-  const groupRoi = document.getElementById('group-roi');
   const groupDiff = document.getElementById('group-diff');
+  const groupTests = document.getElementById('group-tests');
+  const groupAcademy = document.getElementById('group-academy');
+  const groupDataCatalog = document.getElementById('group-data-catalog');
+
   if (groupVars) groupVars.classList.toggle('expanded', moduleName === 'variables');
   if (groupSubs) groupSubs.classList.toggle('expanded', moduleName === 'subprocesses');
   if (groupBpmn) groupBpmn.classList.toggle('expanded', moduleName === 'bpmn-naming');
+  if (groupBpmnLint) groupBpmnLint.classList.toggle('expanded', moduleName === 'bpmn-lint');
   if (groupPmg) groupPmg.classList.toggle('expanded', moduleName === 'pmg');
-  if (groupRoi) groupRoi.classList.toggle('expanded', moduleName === 'roi');
   if (groupDiff) groupDiff.classList.toggle('expanded', moduleName === 'diff');
+  if (groupTests) groupTests.classList.toggle('expanded', moduleName === 'test-gen');
+  if (groupAcademy) groupAcademy.classList.toggle('expanded', moduleName === 'academy');
+  if (groupDataCatalog) groupDataCatalog.classList.toggle('expanded', moduleName === 'data-catalog');
 
   // Onglets variables
   const varTabIds = ['import', 'config', 'procRelTab', 'resultsTab', 'dashTab', 'graphTab', 'rankTab', 'duplicatesTab', 'histTab'];
@@ -5061,6 +4987,7 @@ window.switchModule = function(moduleName) {
   const subTabIds = ['subImportTab', 'subAnalysisTab', 'subMapTab'];
   // Onglets nommage BPMN
   const bpmnTabIds = ['bpmnNamingImportTab', 'bpmnNamingConfigTab', 'bpmnNamingResultsTab'];
+  const bpmnLintTabIds = ['bpmnLintImportTab', 'bpmnLintRulesTab', 'bpmnLintResultsTab'];
   // Onglets PMG
   const pmgTabIds = ['pmgImportTab', 'pmgMatrixTab'];
 
@@ -5075,6 +5002,10 @@ window.switchModule = function(moduleName) {
           } else {
             el.style.display = allRows.length > 0 ? '' : 'none';
           }
+
+          window.addEventListener('resize', () => {
+            document.body.classList.toggle('bpmn-lint-mobile', currentModule === 'bpmn-lint' && window.innerWidth <= 720);
+          });
         } else {
           el.style.display = '';
         }
@@ -5114,6 +5045,13 @@ window.switchModule = function(moduleName) {
     }
   });
 
+  bpmnLintTabIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const hasResults = window.bpmnLintResults && window.bpmnLintResults.length > 0;
+    el.style.display = moduleName === 'bpmn-lint' && (id !== 'bpmnLintResultsTab' || hasResults) ? '' : 'none';
+  });
+
   pmgTabIds.forEach(id => {
     const el = document.getElementById(id);
     if (el) {
@@ -5129,14 +5067,7 @@ window.switchModule = function(moduleName) {
     }
   });
 
-  const roiTabIds = ['roiCalcTab', 'roiConfigTab'];
-  roiTabIds.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.style.display = moduleName === 'roi' ? '' : 'none';
-    }
-  });
-
+  
   // Basculer sur l'onglet par défaut du module
   if (moduleName === 'variables') {
     switchTab('import');
@@ -5145,20 +5076,34 @@ window.switchModule = function(moduleName) {
   } else if (moduleName === 'bpmn-naming') {
     switchTab('bpmn-naming-import');
     initBpmnNamingModule();
+  } else if (moduleName === 'bpmn-lint') {
+    switchTab('bpmn-lint-import');
+    if (typeof initBpmnLintModule === 'function') initBpmnLintModule();
   } else if (moduleName === 'pmg') {
     switchTab('pmg-import');
     if (typeof initPmgModule === 'function') {
       initPmgModule();
     }
-  } else if (moduleName === 'roi') {
-    switchTab('roi-calculator');
-    if (typeof initRoiModule === 'function') {
-      initRoiModule();
-    }
+
   } else if (moduleName === 'diff') {
     switchTab('diff');
     if (typeof initDiffModule === 'function') {
       initDiffModule();
+    }
+  } else if (moduleName === 'test-gen') {
+    switchTab('test-gen');
+    if (typeof initTestGenModule === 'function') {
+      initTestGenModule();
+    }
+  } else if (moduleName === 'academy') {
+    switchTab('academy');
+    if (typeof initAcademyModule === 'function') {
+      initAcademyModule();
+    }
+  } else if (moduleName === 'data-catalog') {
+    switchTab('data-catalog');
+    if (typeof initDataCatalogModule === 'function') {
+      initDataCatalogModule();
     }
   }
 }

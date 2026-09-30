@@ -154,7 +154,7 @@ window.removeCustomPmgRealizationMode = function(index) {
 };
 
 window.pmgStepGoBack = function(targetStep) {
-  for (let i = 1; i <= 4; i++) {
+  for (let i = 1; i <= 5; i++) {
     const panel = document.getElementById(`pmg-step-panel-${i}`);
     const node = document.getElementById(`step-node-${i}`);
     if (panel) panel.style.display = i === targetStep ? 'block' : 'none';
@@ -167,9 +167,13 @@ window.pmgStepGoBack = function(targetStep) {
 
   window.pmgActiveStep = targetStep;
 
-  const progressWidths = { 1: '0%', 2: '34%', 3: '68%', 4: '100%' };
+  const progressWidths = { 1: '0%', 2: '25%', 3: '50%', 4: '75%', 5: '100%' };
   const progressBar = document.getElementById('pmgStepperProgress');
   if (progressBar) progressBar.style.width = progressWidths[targetStep] || '0%';
+
+  if (typeof window.renderAllPmgStepKpis === 'function') {
+    window.renderAllPmgStepKpis();
+  }
 };
 
 window.pmgUploadedFiles = {
@@ -283,19 +287,18 @@ window.savePmgStateToLocalStorage = function() {
       timestamp: new Date().toISOString()
     };
 
-    localStorage.setItem(PMG_PERSISTENCE_KEY, JSON.stringify(state));
+    window.inMemoryPmgState = state;
     window.updatePmgAutoSaveBadge();
   } catch (e) {
-    console.warn("Erreur d'auto-sauvegarde localstorage PMG:", e);
+    console.warn("Erreur d'auto-sauvegarde mémoire PMG:", e);
   }
 };
 
 window.loadPmgStateFromLocalStorage = function() {
   try {
-    const saved = localStorage.getItem(PMG_PERSISTENCE_KEY);
-    if (!saved) return false;
+    const state = window.inMemoryPmgState;
+    if (!state) return false;
 
-    const state = JSON.parse(saved);
     if (!state || (!state.tempSubprocesses?.length && !state.meta?.name)) return false;
 
     // Restore metadata
@@ -431,35 +434,6 @@ if (typeof document !== 'undefined') {
     }, 250);
   });
 }
-
-window.syncPmgStep1Metadata = function() {
-  const name = document.getElementById('pmgProcessNameStep')?.value || 'Lancement projet';
-  const id = document.getElementById('pmgProcessIdStep')?.value || 'lancement-projet';
-  const owner = document.getElementById('pmgProcessOwnerStep')?.value || 'Direction Métier';
-  const exporter = document.getElementById('pmgExporterStep')?.value || 'Équipe PMG / Modélisateur';
-  const version = document.getElementById('pmgProcessVersionStep')?.value || 'v1.0.0';
-  const desc = document.getElementById('pmgProcessDescStep')?.value || 'Cartographie d\'activités PMG.';
-
-  if (document.getElementById('pmgProcessName')) document.getElementById('pmgProcessName').value = name;
-  if (document.getElementById('pmgProcessId')) document.getElementById('pmgProcessId').value = id;
-  if (document.getElementById('pmgProcessOwner')) document.getElementById('pmgProcessOwner').value = owner;
-  if (document.getElementById('pmgExporter')) document.getElementById('pmgExporter').value = exporter;
-  if (document.getElementById('pmgProcessVersion')) document.getElementById('pmgProcessVersion').value = version;
-  if (document.getElementById('pmgProcessDesc')) document.getElementById('pmgProcessDesc').value = desc;
-
-  window.savePmgStateToLocalStorage();
-};
-
-window.validatePmgStep1Metadata = function() {
-  window.syncPmgStep1Metadata();
-  document.getElementById('step-node-1').className = 'step-node completed';
-  document.getElementById('step-node-2').className = 'step-node active';
-  document.getElementById('pmg-step-panel-1').style.display = 'none';
-  document.getElementById('pmg-step-panel-2').style.display = 'block';
-  window.pmgActiveStep = 2;
-  document.getElementById('pmgStepperProgress').style.width = '25%';
-  window.savePmgStateToLocalStorage();
-};
 
 window.loadPmgDemoData = function() {
   // 1. Set Coherent Process Metadata in Step 1
@@ -1261,26 +1235,53 @@ window.renderPmgStep2ManualTable = function() {
 
   let html = '';
   activities.forEach((act, idx) => {
+    const isUserTask = (act.type || '').toLowerCase().includes('user');
     const entityVal = act.entity && act.entity !== 'Non défini' ? act.entity : '';
     const groupVal = act.userGroup || '';
+    const hasGroup = groupVal.trim().length > 0;
+
+    let groupCellHtml = '';
+    if (isUserTask) {
+      if (hasGroup) {
+        groupCellHtml = `
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <input type="text" id="pmgGroupInput_${idx}" value="${escAttr(groupVal)}" placeholder="Ex: Validateurs_N1" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
+            <span class="pmg-badge-ok" style="font-size:10px; width:fit-content;">👤 Groupe candidat défini</span>
+          </div>
+        `;
+      } else {
+        groupCellHtml = `
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <input type="text" id="pmgGroupInput_${idx}" class="pmg-input-warn" value="" placeholder="⚠️ Saisir le groupe candidat (ex: Gestionnaires_RH)" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); padding: 4px 8px;">
+            <span class="pmg-badge-warn" style="font-size:10px; width:fit-content;">⚠️ Warning : User Task sans groupe candidat</span>
+          </div>
+        `;
+      }
+    } else {
+      groupCellHtml = `
+        <input type="text" id="pmgGroupInput_${idx}" value="" placeholder="— Non applicable (${act.typeLabel || act.type})" readonly style="width: 100%; height: 32px; font-size: 11.5px; border-radius: var(--border-radius-md); border: 1px dashed var(--border-color); background: rgba(241, 245, 249, 0.6); color: #94a3b8; padding: 4px 8px; cursor:not-allowed;">
+      `;
+    }
 
     html += `
       <tr style="border-bottom: 1px solid var(--border-color);">
-        <td style="padding: 8px;">
-          <span style="display:inline-block; margin-left:${(act.level - 1) * 12}px;">
-            ${act.level > 1 ? '└─ ' : ''}<strong>${act.name}</strong>
+        <td style="padding: 10px 8px; vertical-align: top;">
+          <span style="display:inline-block; margin-left:${(act.level - 1) * 14}px;">
+            ${act.level > 1 ? '<span style="color:#009cd7;">└─ </span>' : ''}<strong>${escHtml(act.name)}</strong>
+          </span>
+          <div style="font-size:10.5px; color:#94a3b8; margin-left:${(act.level - 1) * 14}px;">id: <code>${escHtml(act.id)}</code></div>
+        </td>
+        <td style="padding: 10px 8px; vertical-align: top;">
+          <span style="font-size: 11px; padding: 3px 8px; border-radius: 6px; font-weight:700; ${isUserTask ? 'background: rgba(234, 91, 12, 0.1); color: #ea5b0c; border: 1px solid rgba(234, 91, 12, 0.25);' : 'background: rgba(0, 156, 215, 0.1); color: #009cd7; border: 1px solid rgba(0, 156, 215, 0.25);'}">
+            ${escHtml(act.typeLabel || act.type)}
           </span>
         </td>
-        <td style="padding: 8px;">
-          <span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(59, 130, 246, 0.1); color: var(--brand-primary);">
-            ${act.type}
-          </span>
+        <td style="padding: 8px 6px; vertical-align: top;">
+          <input type="text" id="pmgEntityInput_${idx}" value="${escAttr(entityVal)}" placeholder="Ex: Direction Réseau / Lane" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
+          ${entityVal ? `<span class="pmg-badge-info" style="font-size:10px; margin-top:4px; width:fit-content;">🏢 Entité / Lane liée</span>` : `<span style="font-size:10px; color:#94a3b8; margin-top:4px; display:block;">Optionnel (à compléter)</span>`}
         </td>
-        <td style="padding: 6px;">
-          <input type="text" id="pmgEntityInput_${idx}" value="${entityVal}" placeholder="Ex: Direction Financière" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
-        </td>
-        <td style="padding: 6px;">
-          <input type="text" id="pmgGroupInput_${idx}" value="${groupVal}" placeholder="Ex: Validateurs_N1" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
+        <td style="padding: 8px 6px; vertical-align: top;">
+          ${groupCellHtml}
         </td>
       </tr>
     `;
@@ -1835,6 +1836,7 @@ window.handlePmgOneShotBpmnFiles = function(files) {
 
   const fileList = Array.from(files);
   const validFiles = fileList.filter(f => {
+    if (window.validateFileSize && !window.validateFileSize(f)) return false;
     const n = f.name.toLowerCase();
     return n.endsWith('.bpmn') || n.endsWith('.xml');
   });
@@ -1940,21 +1942,46 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
           });
         });
 
-        // 4. Sequence flows & conditions mapping (targetRef -> condition / expression)
+        // 4. Gateways & Sequence flows mapping (targetRef -> intelligent condition / expression)
+        const gatewayNames = new Map();
+        const gateways = procEl.querySelectorAll('exclusiveGateway, bpmn\\:exclusiveGateway, inclusiveGateway, bpmn\\:inclusiveGateway, complexGateway, bpmn\\:complexGateway, eventBasedGateway, bpmn\\:eventBasedGateway');
+        gateways.forEach(gw => {
+          const gwId = gw.getAttribute('id');
+          const gwName = gw.getAttribute('name') || '';
+          if (gwId) gatewayNames.set(gwId, gwName);
+        });
+
         const targetToCondition = new Map();
         const seqFlows = procEl.querySelectorAll('sequenceFlow, bpmn\\:sequenceFlow');
         seqFlows.forEach(sf => {
           const targetRef = sf.getAttribute('targetRef');
-          const sfName = sf.getAttribute('name') || '';
+          const sourceRef = sf.getAttribute('sourceRef');
+          const sfName = (sf.getAttribute('name') || '').trim();
           const condEl = sf.querySelector('conditionExpression, bpmn\\:conditionExpression');
           let condText = condEl ? condEl.textContent.trim() : '';
-          if (sfName && !condText) condText = sfName;
-          if (targetRef && condText) {
-            targetToCondition.set(targetRef, condText);
+
+          let composedCond = '';
+          const gwLabel = sourceRef ? (gatewayNames.get(sourceRef) || '') : '';
+
+          if (gwLabel && sfName) {
+            composedCond = `Si [${gwLabel}] = "${sfName}"`;
+            if (condText && condText !== sfName) composedCond += ` (${condText})`;
+          } else if (gwLabel && condText) {
+            composedCond = `Si [${gwLabel}] (${condText})`;
+          } else if (sfName && condText && sfName !== condText) {
+            composedCond = `Si "${sfName}" (${condText})`;
+          } else if (sfName) {
+            composedCond = `Si "${sfName}"`;
+          } else if (condText) {
+            composedCond = `Si ${condText}`;
+          }
+
+          if (targetRef && composedCond) {
+            targetToCondition.set(targetRef, composedCond);
           }
         });
 
-        // 5. Extract Tasks & Activities
+        // 5. Extract Tasks & Activities with deep metadata
         const activities = [];
         const callActivities = [];
         const poolName = processIdToPool.get(procId) || '';
@@ -1972,25 +1999,39 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
             let entity = '';
             if (poolName && laneName) {
               entity = `${poolName} (Lane: ${laneName})`;
+            } else if (laneName) {
+              entity = `Lane: ${laneName}`;
             } else if (poolName) {
               entity = poolName;
-            } else if (laneName) {
-              entity = laneName;
             } else {
-              entity = 'Direction Métier';
+              entity = ''; // Left clean if no Lane/Pool
             }
 
-            // User Groups / Candidates
-            let userGroup = el.getAttribute('camunda:candidateGroups') || el.getAttribute('candidateGroups') || '';
-            if (!userGroup) {
-              const assignDef = el.querySelector('assignmentDefinition, zeebe\\:assignmentDefinition');
-              if (assignDef) {
-                userGroup = assignDef.getAttribute('candidateGroups') || assignDef.getAttribute('assignee') || '';
+            // User Groups / Candidates detection
+            let userGroup = '';
+            let userGroupWarning = false;
+
+            if (localName === 'usertask') {
+              userGroup = el.getAttribute('camunda:candidateGroups') || el.getAttribute('candidateGroups') || '';
+              if (!userGroup) {
+                const assignDef = el.querySelector('assignmentDefinition, zeebe\\:assignmentDefinition');
+                if (assignDef) {
+                  userGroup = assignDef.getAttribute('candidateGroups') || assignDef.getAttribute('candidateUsers') || '';
+                }
               }
-            }
-            if (!userGroup) {
-              const assignee = el.getAttribute('camunda:assignee') || el.getAttribute('assignee') || '';
-              if (assignee) userGroup = `Assigné: ${assignee}`;
+              if (!userGroup) {
+                userGroup = el.getAttribute('camunda:candidateUsers') || el.getAttribute('candidateUsers') || '';
+              }
+              if (!userGroup) {
+                const assignee = el.getAttribute('camunda:assignee') || el.getAttribute('assignee') || '';
+                if (assignee) userGroup = `Assigné: ${assignee}`;
+              }
+              if (!userGroup) {
+                userGroupWarning = true;
+              }
+            } else {
+              userGroup = '';
+              userGroupWarning = false;
             }
 
             // Realization Mode deduction
@@ -2003,14 +2044,14 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
               realizationMode = 'SP0';
             }
 
-            // Condition on incoming flow
+            // Condition on incoming flow (or empty for manual input)
             const applicableCase = targetToCondition.get(actId) || '';
 
             // Task Documentation comment
             const taskDocEl = el.querySelector(':scope > documentation, :scope > bpmn\\:documentation');
             const comment = taskDocEl ? taskDocEl.textContent.trim() : '';
 
-            // Extract IO
+            // Extract IO cleanly
             const { inputs, outputs } = extractIoForNode(el);
 
             // CallActivity specific target element
@@ -2025,6 +2066,18 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
               callActivities.push({ actId, actName, calledElement });
             }
 
+            // Check if element is inside an embedded subProcess
+            let embeddedParentId = '';
+            let parentEl = el.parentElement;
+            while (parentEl && parentEl !== procEl) {
+              const pName = (parentEl.localName || '').toLowerCase();
+              if (pName === 'subprocess' || pName === 'sub-process') {
+                embeddedParentId = parentEl.getAttribute('id') || '';
+                break;
+              }
+              parentEl = parentEl.parentElement;
+            }
+
             activities.push({
               id: actId,
               name: actName,
@@ -2032,12 +2085,14 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
               typeLabel: TYPE_LABELS[localName] || localName,
               entity,
               userGroup,
+              userGroupWarning,
               inputs,
               outputs,
               realizationMode,
               applicableCase,
               comment,
               calledElement,
+              embeddedParentId,
               processId: procId,
               fileName: entry.fileName
             });
@@ -2094,12 +2149,15 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
 
     proc.activities.forEach(act => {
       const uniqueHierarchicalId = `${procId}_${act.id}`;
+      const effectiveParentId = act.embeddedParentId || parentNodeId || (currentLevel > 1 ? parentNodeId : '');
+      const effectiveLevel = act.embeddedParentId ? currentLevel + 1 : currentLevel;
+
       const activityRecord = {
         ...act,
         id: act.id,
         uniqueId: uniqueHierarchicalId,
-        parentId: parentNodeId || (currentLevel > 1 ? parentNodeId : ''),
-        level: currentLevel,
+        parentId: effectiveParentId,
+        level: effectiveLevel,
         parentProcessId: procId,
         parentProcessName: proc.name
       };
@@ -2152,6 +2210,7 @@ window.populatePmgAllStepsFromBpmnBatch = function(batchResult) {
     typeLabel: a.typeLabel,
     entity: a.entity,
     userGroup: a.userGroup,
+    userGroupWarning: a.userGroupWarning,
     inputs: a.inputs,
     outputs: a.outputs,
     realizationMode: a.realizationMode,
@@ -2163,15 +2222,16 @@ window.populatePmgAllStepsFromBpmnBatch = function(batchResult) {
     parentProcessName: a.parentProcessName
   }));
 
+  // Clean metadata: fill only if found from BPMN, otherwise leave empty
   window.pmgProcessDetails = {
-    id: root.id,
-    name: root.name,
-    owner: 'Direction Métier',
-    exporter: root.exporter ? `${root.exporter} ${root.exporterVersion || ''}`.trim() : 'Équipe PMG / Modélisateur',
-    version: 'v1.0.0',
-    badges: 'CDD / CPE / SGP / SP0 / DMN',
-    defaultFille: 'NA',
-    desc: root.description || `Cartographie automatique du processus ${root.name} avec ${batchResult.resolvedSubprocesses.length} processus interconnectés.`
+    id: root.id || '',
+    name: root.name || '',
+    owner: '', // Clean for user manual fill
+    exporter: root.exporter ? `${root.exporter} ${root.exporterVersion || ''}`.trim() : '',
+    version: root.isExecutable === 'true' ? 'v1.0.0' : '',
+    badges: '',
+    defaultFille: '',
+    desc: root.description || ''
   };
 
   // 2. Populate Step 1 Metadata Inputs
@@ -2221,12 +2281,246 @@ window.populatePmgAllStepsFromBpmnBatch = function(batchResult) {
   const btnNext1 = document.getElementById('btnPmgStep1Next');
   if (btnNext1) btnNext1.disabled = false;
 
-  // 8. Render Batch Summary Card
+  // 8. Render All Dynamic Step KPIs
+  window.renderAllPmgStepKpis();
+
+  // 9. Render Batch Summary Card
   window.renderPmgBatchSummary(batchResult);
 
-  // 9. Auto-save
+  // 10. Auto-save
   window.savePmgStateToLocalStorage();
 };
+
+// =========================================================================
+// STEP WIZARD KPIS & ANALYTICAL DASHBOARDS
+// =========================================================================
+
+window.renderAllPmgStepKpis = function() {
+  window.renderPmgStep1Kpis();
+  window.renderPmgStep2Kpis();
+  window.renderPmgStep3Kpis();
+  window.renderPmgStep4Kpis();
+  window.renderPmgStep5Kpis();
+};
+
+window.renderPmgStep1Kpis = function() {
+  const container = document.getElementById('pmgStep1Kpis');
+  if (!container) return;
+
+  const details = window.pmgProcessDetails || {};
+  const fields = [details.name, details.id, details.owner, details.exporter, details.version, details.desc];
+  const filledCount = fields.filter(f => f && f.trim().length > 0).length;
+  const pct = Math.round((filledCount / fields.length) * 100);
+
+  const acts = window.pmgTempSubprocesses || window.pmgActivities || [];
+
+  container.innerHTML = `
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Complétude Métadonnées</div>
+      <div class="pmg-kpi-val" style="color:${pct >= 70 ? 'var(--ok)' : 'var(--warn)'}">${pct}%</div>
+      <div class="pmg-kpi-sub">${filledCount} / ${fields.length} champs renseignés</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Processus Racine</div>
+      <div class="pmg-kpi-val" style="font-size:15px; color:var(--brand-primary);">${escHtml(details.name ? (details.name.length > 20 ? details.name.substring(0, 18) + '...' : details.name) : 'Non défini')}</div>
+      <div class="pmg-kpi-sub">ID: <code>${escHtml(details.id || 'N/A')}</code></div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Activités Détectées</div>
+      <div class="pmg-kpi-val" style="color:var(--ok);">${acts.length}</div>
+      <div class="pmg-kpi-sub">Prêtes pour arborescence</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Outil Modélisateur</div>
+      <div class="pmg-kpi-val" style="font-size:13.5px; color:#64748b;">${escHtml(details.exporter ? (details.exporter.length > 22 ? details.exporter.substring(0, 20) + '...' : details.exporter) : 'Camunda Modeler')}</div>
+      <div class="pmg-kpi-sub">Version : ${escHtml(details.version || 'v1.0.0')}</div>
+    </div>
+  `;
+};
+
+window.renderPmgStep2Kpis = function() {
+  const container = document.getElementById('pmgStep2Kpis');
+  if (!container) return;
+
+  const acts = window.pmgTempSubprocesses || window.pmgActivities || [];
+  if (acts.length === 0) {
+    container.innerHTML = '<span style="color:var(--text-tertiary); font-size:12px;">Chargez des fichiers BPMN pour afficher les statistiques d\'arborescence.</span>';
+    return;
+  }
+
+  const maxLevel = acts.length > 0 ? Math.max(...acts.map(a => a.level || 1)) : 1;
+  const userTasks = acts.filter(a => (a.type || '').toLowerCase().includes('user')).length;
+  const serviceTasks = acts.filter(a => (a.type || '').toLowerCase().includes('service')).length;
+  const callActs = acts.filter(a => (a.type || '').toLowerCase().includes('call') || (a.type || '').toLowerCase().includes('sous-processus')).length;
+
+  container.innerHTML = `
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Volume Total</div>
+      <div class="pmg-kpi-val" style="color:var(--brand-primary);">${acts.length}</div>
+      <div class="pmg-kpi-sub">Activités &amp; flux extraits</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Profondeur d'Arbre</div>
+      <div class="pmg-kpi-val" style="color:${maxLevel > 3 ? '#8b5cf6' : '#009cd7'};">Niveau ${maxLevel}</div>
+      <div class="pmg-kpi-sub">Hiérarchie multiniveau</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Tâches Humaines (User)</div>
+      <div class="pmg-kpi-val" style="color:#ea5b0c;">${userTasks}</div>
+      <div class="pmg-kpi-sub">Interactives avec opérateurs</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Automatisations &amp; Calls</div>
+      <div class="pmg-kpi-val" style="color:var(--ok);">${serviceTasks + callActs}</div>
+      <div class="pmg-kpi-sub">${serviceTasks} services, ${callActs} sous-processus</div>
+    </div>
+  `;
+};
+
+window.renderPmgStep3Kpis = function() {
+  const container = document.getElementById('pmgStep3Kpis');
+  if (!container) return;
+
+  const acts = window.pmgTempSubprocesses || window.pmgActivities || [];
+  if (acts.length === 0) return;
+
+  const userTasks = acts.filter(a => (a.type || '').toLowerCase().includes('user'));
+  const userTasksWithGroup = userTasks.filter(a => a.userGroup && a.userGroup.trim().length > 0);
+  const userTasksWithoutGroup = userTasks.length - userTasksWithGroup.length;
+
+  const actsWithEntity = acts.filter(a => a.entity && a.entity.trim().length > 0 && a.entity !== 'Non défini');
+  const entityCoverage = acts.length > 0 ? Math.round((actsWithEntity.length / acts.length) * 100) : 0;
+
+  const uniqueEntities = new Set(acts.map(a => a.entity).filter(Boolean));
+
+  container.innerHTML = `
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Couverture Entités/Lanes</div>
+      <div class="pmg-kpi-val" style="color:${entityCoverage >= 80 ? 'var(--ok)' : 'var(--warn)'};">${entityCoverage}%</div>
+      <div class="pmg-kpi-sub">${actsWithEntity.length} / ${acts.length} tâches assignées</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">User Tasks Qualifiées</div>
+      <div class="pmg-kpi-val" style="color:var(--ok);">${userTasksWithGroup.length} / ${userTasks.length}</div>
+      <div class="pmg-kpi-sub">Avec groupe candidat BPMN</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Warnings User Tasks</div>
+      <div class="pmg-kpi-val" style="color:${userTasksWithoutGroup > 0 ? '#ef4444' : 'var(--ok)'};">
+        ${userTasksWithoutGroup > 0 ? `⚠️ ${userTasksWithoutGroup}` : '✅ 0'}
+      </div>
+      <div class="pmg-kpi-sub">${userTasksWithoutGroup > 0 ? 'Sans groupe candidat' : 'Toutes les User Tasks sont assignées'}</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Rôles &amp; Entités Distincts</div>
+      <div class="pmg-kpi-val" style="color:var(--brand-primary);">${uniqueEntities.size}</div>
+      <div class="pmg-kpi-sub">Pools &amp; Lanes identifiées</div>
+    </div>
+  `;
+};
+
+window.renderPmgStep4Kpis = function() {
+  const container = document.getElementById('pmgStep4Kpis');
+  if (!container) return;
+
+  const acts = window.pmgTempSubprocesses || window.pmgActivities || [];
+  if (acts.length === 0) return;
+
+  const uniqueInputs = new Set();
+  const uniqueOutputs = new Set();
+  const allVars = new Set();
+  let actsWithIo = 0;
+
+  acts.forEach(a => {
+    const hasIn = a.inputs && a.inputs.length > 0;
+    const hasOut = a.outputs && a.outputs.length > 0;
+    if (hasIn || hasOut) actsWithIo++;
+
+    (a.inputs || []).forEach(v => {
+      const clean = getVarName(v);
+      if (clean) { uniqueInputs.add(clean); allVars.add(clean); }
+    });
+    (a.outputs || []).forEach(v => {
+      const clean = getVarName(v);
+      if (clean) { uniqueOutputs.add(clean); allVars.add(clean); }
+    });
+  });
+
+  const ioCoverage = acts.length > 0 ? Math.round((actsWithIo / acts.length) * 100) : 0;
+
+  container.innerHTML = `
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Variables Uniques I/O</div>
+      <div class="pmg-kpi-val" style="color:var(--brand-primary);">${allVars.size}</div>
+      <div class="pmg-kpi-sub">Dictionnaire de données</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Couverture Flux I/O</div>
+      <div class="pmg-kpi-val" style="color:${ioCoverage >= 70 ? 'var(--ok)' : 'var(--warn)'};">${ioCoverage}%</div>
+      <div class="pmg-kpi-sub">${actsWithIo} / ${acts.length} activités avec I/O</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Variables d'Entrée (Inputs)</div>
+      <div class="pmg-kpi-val" style="color:#009cd7;">${uniqueInputs.size}</div>
+      <div class="pmg-kpi-sub">Consommées par les tâches</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Variables de Sortie (Outputs)</div>
+      <div class="pmg-kpi-val" style="color:#10b981;">${uniqueOutputs.size}</div>
+      <div class="pmg-kpi-sub">Générées par les tâches</div>
+    </div>
+  `;
+};
+
+window.renderPmgStep5Kpis = function() {
+  const container = document.getElementById('pmgStep5Kpis');
+  if (!container) return;
+
+  const acts = window.pmgTempSubprocesses || window.pmgActivities || [];
+  if (acts.length === 0) return;
+
+  const modeCounts = {};
+  let actsWithCase = 0;
+  let actsWithComment = 0;
+
+  acts.forEach(a => {
+    const m = a.realizationMode || 'Manuelle';
+    modeCounts[m] = (modeCounts[m] || 0) + 1;
+    if (a.applicableCase && a.applicableCase.trim().length > 0) actsWithCase++;
+    if (a.comment && a.comment.trim().length > 0) actsWithComment++;
+  });
+
+  const caseCoverage = acts.length > 0 ? Math.round((actsWithCase / acts.length) * 100) : 0;
+  const docCoverage = acts.length > 0 ? Math.round((actsWithComment / acts.length) * 100) : 0;
+
+  container.innerHTML = `
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Modes de Réalisation</div>
+      <div class="pmg-kpi-val" style="font-size:14px; color:var(--text-primary); gap:4px; flex-wrap:wrap;">
+        <span class="pmg-badge-ok">${modeCounts['Automatique'] || 0} Auto</span>
+        <span class="pmg-badge-info">${modeCounts['SP0'] || 0} SP0</span>
+        <span class="pmg-badge-warn">${modeCounts['Call Activity'] || 0} Call</span>
+      </div>
+      <div class="pmg-kpi-sub">${modeCounts['Manuelle'] || 0} manuelles</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Conditions Détectées (Gateways)</div>
+      <div class="pmg-kpi-val" style="color:#009cd7;">${actsWithCase} (${caseCoverage}%)</div>
+      <div class="pmg-kpi-sub">Cas d'applicabilité BPMN</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Documentation &amp; Notes</div>
+      <div class="pmg-kpi-val" style="color:${docCoverage >= 50 ? 'var(--ok)' : '#64748b'};">${actsWithComment} (${docCoverage}%)</div>
+      <div class="pmg-kpi-sub">Balises documentation</div>
+    </div>
+    <div class="pmg-kpi-item">
+      <div class="pmg-kpi-label">Statut Global PMG</div>
+      <div class="pmg-kpi-val" style="color:var(--ok);">Prêt à finaliser</div>
+      <div class="pmg-kpi-sub">Exportation Excel / PDF active</div>
+    </div>
+  `;
+};
+
 
 window.renderPmgBatchSummary = function(batchResult) {
   const container = document.getElementById('pmgOneShotSummaryContainer');
@@ -2738,6 +3032,41 @@ function extractPmgActivities(xmlDoc) {
   return activities;
 }
 
+// Helpers to clean and format BPMN variables without duplicate noise
+function cleanVarIdentifier(str) {
+  if (!str) return '';
+  let s = String(str).trim();
+  s = s.replace(/^[=]/, '').trim();
+  s = s.replace(/^\$\{\s*([a-zA-Z0-9_]+)\s*\}$/, '$1');
+  s = s.replace(/^#\{\s*([a-zA-Z0-9_]+)\s*\}$/, '$1');
+  return s.trim();
+}
+
+function formatPmgVariable(target, source, type) {
+  const cleanTarget = cleanVarIdentifier(target);
+  const cleanSource = cleanVarIdentifier(source);
+  
+  let baseName = cleanTarget || cleanSource;
+  if (!baseName) return '';
+
+  let typeLabel = '';
+  if (type && typeof type === 'string' && type.trim() && !type.toLowerCase().includes('undefined')) {
+    typeLabel = type.trim();
+    typeLabel = typeLabel.charAt(0).toUpperCase() + typeLabel.slice(1);
+  }
+
+  // If source is a different valid variable name (alias) and not an expression
+  if (cleanSource && cleanTarget && cleanSource.toLowerCase() !== cleanTarget.toLowerCase() && /^[a-zA-Z0-9_]+$/.test(cleanSource)) {
+    return typeLabel ? `${cleanTarget} (alias: ${cleanSource}, ${typeLabel})` : `${cleanTarget} (alias: ${cleanSource})`;
+  }
+
+  if (typeLabel) {
+    return `${baseName} (${typeLabel})`;
+  }
+
+  return baseName;
+}
+
 // Extract nested inputs/outputs under an activity XML node
 function extractIoForNode(node) {
   const inputs = [];
@@ -2747,68 +3076,35 @@ function extractIoForNode(node) {
   for (let i = 0; i < descendants.length; i++) {
     const el = descendants[i];
     const localName = el.localName ? el.localName.toLowerCase() : '';
+    const typeAttr = el.getAttribute('type') || '';
     
     // Zeebe / Camunda in/out
     if (localName === 'input' || localName === 'in') {
       const source = el.getAttribute('source') || el.getAttribute('sourceExpression') || '';
       const target = el.getAttribute('target') || '';
-      if (target && source) {
-        if (target === source) {
-          inputs.push(target);
-        } else {
-          inputs.push(`${target} (${source})`);
-        }
-      } else if (target) {
-        inputs.push(target);
-      } else if (source) {
-        inputs.push(source);
-      }
+      const formatted = formatPmgVariable(target, source, typeAttr);
+      if (formatted) inputs.push(formatted);
     } else if (localName === 'output' || localName === 'out') {
       const source = el.getAttribute('source') || el.getAttribute('sourceExpression') || '';
       const target = el.getAttribute('target') || '';
-      if (target && source) {
-        if (target === source) {
-          outputs.push(target);
-        } else {
-          outputs.push(`${target} (${source})`);
-        }
-      } else if (target) {
-        outputs.push(target);
-      } else if (source) {
-        outputs.push(source);
-      }
+      const formatted = formatPmgVariable(target, source, typeAttr);
+      if (formatted) outputs.push(formatted);
     } else if (localName === 'inputparameter') {
       const name = el.getAttribute('name') || '';
       const val = el.textContent ? el.textContent.trim() : '';
-      if (name && val) {
-        if (name === val) {
-          inputs.push(name);
-        } else {
-          inputs.push(`${name} (${val})`);
-        }
-      } else if (name) {
-        inputs.push(name);
-      } else if (val) {
-        inputs.push(val);
-      }
+      const formatted = formatPmgVariable(name, val, typeAttr);
+      if (formatted) inputs.push(formatted);
     } else if (localName === 'outputparameter') {
       const name = el.getAttribute('name') || '';
       const val = el.textContent ? el.textContent.trim() : '';
-      if (name && val) {
-        if (name === val) {
-          outputs.push(name);
-        } else {
-          outputs.push(`${name} (${val})`);
-        }
-      } else if (name) {
-        outputs.push(name);
-      } else if (val) {
-        outputs.push(val);
-      }
+      const formatted = formatPmgVariable(name, val, typeAttr);
+      if (formatted) outputs.push(formatted);
     } else if (localName === 'formfield') {
       const fieldId = el.getAttribute('id') || el.getAttribute('name') || '';
-      if (fieldId && !inputs.includes(fieldId)) {
-        inputs.push(fieldId);
+      const fieldType = el.getAttribute('type') || '';
+      if (fieldId) {
+        const formatted = formatPmgVariable(fieldId, '', fieldType);
+        if (formatted) inputs.push(formatted);
       }
     }
   }
@@ -2896,7 +3192,8 @@ window.savePmgDetails = function() {
   // Update state details
   window.pmgProcessDetails = { ...window.pmgProcessDetails, ...details };
   
-  localStorage.setItem(`pda_camunda_pmg_data_${processId}`, JSON.stringify(details));
+  window.inMemoryPmgDetailsMap = window.inMemoryPmgDetailsMap || {};
+  window.inMemoryPmgDetailsMap[processId] = details;
   
   // Dynamically update PMG dashboard components (Preview and completeness KPI)
   // to avoid redrawing inputs and losing keyboard focus
@@ -2927,11 +3224,10 @@ window.savePmgDetails = function() {
 };
 
 function loadPmgData(processId) {
-  const data = localStorage.getItem(`pda_camunda_pmg_data_${processId}`);
-  if (data) {
+  window.inMemoryPmgDetailsMap = window.inMemoryPmgDetailsMap || {};
+  const details = window.inMemoryPmgDetailsMap[processId];
+  if (details) {
     try {
-      const details = JSON.parse(data);
-      
       document.getElementById('pmgProcessName').value = details.name || '';
       document.getElementById('pmgProcessId').value = details.id || '';
       document.getElementById('pmgProcessVersion').value = details.version || '';
@@ -4825,3 +5121,766 @@ window.updatePmgGridCell = function(index, field, value) {
 
   window.savePmgStateToLocalStorage();
 };
+
+// =========================================================================
+// PMG SUBVIEW SWITCHER & CONTROLLER
+// =========================================================================
+
+window.switchPmgSubView = function(viewKey) {
+  const viewKeys = ['matrix', 'audit', 'raci', 'iocross', 'grid'];
+  
+  viewKeys.forEach(k => {
+    const btn = document.getElementById('btnPmgSubView' + k.charAt(0).toUpperCase() + k.slice(1));
+    const section = document.getElementById('pmgSubView' + k.charAt(0).toUpperCase() + k.slice(1));
+    
+    if (btn) {
+      if (k === viewKey) btn.classList.add('active');
+      else btn.classList.remove('active');
+    }
+    
+    if (section) {
+      section.style.display = (k === viewKey) ? 'block' : 'none';
+    }
+  });
+
+  if (viewKey === 'matrix') {
+    if (window.renderPmgMatrix) window.renderPmgMatrix();
+  } else if (viewKey === 'audit') {
+    window.renderPmgGovernanceAudit('pmgGovernanceAuditContainer');
+  } else if (viewKey === 'raci') {
+    window.renderPmgRaciMatrix('pmgRaciContainer');
+  } else if (viewKey === 'iocross') {
+    window.renderPmgIoCrossMatrix('pmgIoCrossContainer');
+  } else if (viewKey === 'grid') {
+    window.renderPmgGlobalGridTable();
+  }
+};
+
+// =========================================================================
+// FEATURE 1: ASSISTANT IA / SMART AUTO-FILL & HEURISTIC ENGINE
+// =========================================================================
+
+window.autoFillPmgMissingDoc = function() {
+  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
+  if (activities.length === 0) {
+    alert("Aucune activité chargée. Veuillez importer un ou plusieurs fichiers BPMN.");
+    return;
+  }
+
+  let enrichedCount = 0;
+
+  activities.forEach(act => {
+    const nameLower = (act.name || '').toLowerCase();
+    const isSub = (act.type || '').toLowerCase().includes('sous-processus') || (act.type || '').toLowerCase().includes('call');
+    const isUser = (act.type || '').toLowerCase().includes('user');
+
+    // 1. Suggest Applicability Condition ("Applicable dans quel cas ?")
+    if (!act.applicableCase || act.applicableCase.trim() === '') {
+      if (nameLower.includes('verif') || nameLower.includes('vérif') || nameLower.includes('qualif') || nameLower.includes('valid')) {
+        act.applicableCase = "Cas nominal : si le dossier ou les données requises sont initialisées";
+      } else if (nameLower.includes('fraud') || nameLower.includes('alert') || nameLower.includes('rejet') || nameLower.includes('suspect') || nameLower.includes('litige')) {
+        act.applicableCase = "Cas d'exception : uniquement si score de risque élevé ou alerte anomalie";
+      } else if (nameLower.includes('paiement') || nameLower.includes('factur') || nameLower.includes('debit') || nameLower.includes('débit') || nameLower.includes('encaisse')) {
+        act.applicableCase = "Si commande approuvée et modalité de règlement sélectionnée";
+      } else if (nameLower.includes('notif') || nameLower.includes('mail') || nameLower.includes('sms') || nameLower.includes('courrier') || nameLower.includes('relanc')) {
+        act.applicableCase = "Systématique : à chaque jalon clé ou notification de l'usager";
+      } else if (nameLower.includes('calcul') || nameLower.includes('scor') || nameLower.includes('tarifi')) {
+        act.applicableCase = "Automatique dès réception du flux entrant complet";
+      } else if (nameLower.includes('clotur') || nameLower.includes('clôtur') || nameLower.includes('archiv') || nameLower.includes('final')) {
+        act.applicableCase = "Cas nominal : dès validation complète de toutes les étapes préalables";
+      } else if (isSub) {
+        act.applicableCase = "Appel du sous-processus métier dédié";
+      } else {
+        act.applicableCase = "Exécution standard du flux nominal";
+      }
+      enrichedCount++;
+    }
+
+    // 2. Suggest Professional Business Comment
+    if (!act.comment || act.comment.trim() === '') {
+      const entityName = act.entity && act.entity !== 'Non défini' ? act.entity : 'Acteur Métier';
+      const grp = act.userGroup ? ` (${act.userGroup})` : '';
+      const inCount = (act.inputs || []).length;
+      const outCount = (act.outputs || []).length;
+      
+      act.comment = `Tâche opérée par ${entityName}${grp}. Traite ${inCount} entrée(s) et produit ${outCount} variable(s) pour la continuité du flux.`;
+      enrichedCount++;
+    }
+
+    // 3. Auto-fix missing candidate group on user tasks
+    if (isUser && (!act.userGroup || act.userGroup.trim() === '')) {
+      const entClean = (act.entity && act.entity !== 'Non défini' ? act.entity : 'Operateurs')
+        .replace(/[^a-zA-Z0-9]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+      act.userGroup = `Gestionnaires_${entClean || 'Metier'}`;
+      act.userGroupWarning = false;
+      enrichedCount++;
+    }
+
+    // 4. Auto-assign realization mode if missing
+    if (!act.realizationMode || act.realizationMode.trim() === '') {
+      if (isSub) act.realizationMode = 'Call Activity';
+      else if (isUser) act.realizationMode = 'Manuelle';
+      else act.realizationMode = 'Automatique';
+      enrichedCount++;
+    }
+  });
+
+  // Re-sync with DOM inputs if visible
+  if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
+  if (window.renderPmgStep3ManualTable) window.renderPmgStep3ManualTable();
+  if (window.renderPmgStep4ManualTable) window.renderPmgStep4ManualTable();
+  if (window.renderPmgMatrix) window.renderPmgMatrix();
+  if (window.renderAllPmgStepKpis) window.renderAllPmgStepKpis();
+  window.savePmgStateToLocalStorage();
+
+  // Visual Alert / Feedback
+  alert(`✨ Assistant IA PMG : ${enrichedCount} champ(s) documenté(s) ou harmonisé(s) automatiquement avec succès !`);
+};
+
+// =========================================================================
+// FEATURE 2: AUDIT SANTÉ & RÈGLES DE GOUVERNANCE PMG (HEALTH CHECK)
+// =========================================================================
+
+window.renderPmgGovernanceAudit = function(containerId = 'pmgGovernanceAuditContainer') {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
+  if (activities.length === 0) {
+    container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-tertiary);">Chargez des processus BPMN pour exécuter l\'audit de gouvernance PMG.</div>';
+    return;
+  }
+
+  // Evaluate Rules:
+  // Rule 1: User Tasks Candidate Groups
+  const userTasks = activities.filter(a => (a.type || '').toLowerCase().includes('user'));
+  const userTasksMissingGroup = userTasks.filter(a => !a.userGroup || a.userGroup.trim() === '');
+  const r1Score = userTasks.length === 0 ? 100 : Math.round(((userTasks.length - userTasksMissingGroup.length) / userTasks.length) * 100);
+
+  // Rule 2: Data Lineage Continuity (At least 1 Input or 1 Output)
+  const tasksMissingIo = activities.filter(a => (!a.inputs || a.inputs.length === 0) && (!a.outputs || a.outputs.length === 0));
+  const r2Score = Math.round(((activities.length - tasksMissingIo.length) / activities.length) * 100);
+
+  // Rule 3: Applicability Conditions & Gateways Coverage
+  const tasksMissingCase = activities.filter(a => !a.applicableCase || a.applicableCase.trim() === '');
+  const r3Score = Math.round(((activities.length - tasksMissingCase.length) / activities.length) * 100);
+
+  // Rule 4: Realization Modes Consistency
+  const modesValid = ['SP0', 'Call Activity', 'Manuelle', 'Automatique'];
+  const tasksInvalidMode = activities.filter(a => !a.realizationMode || !modesValid.some(m => m.toLowerCase() === a.realizationMode.toLowerCase()));
+  const r4Score = Math.round(((activities.length - tasksInvalidMode.length) / activities.length) * 100);
+
+  // Rule 5: Roles & Entities Assignment
+  const tasksMissingEntity = activities.filter(a => !a.entity || a.entity === 'Non défini');
+  const r5Score = Math.round(((activities.length - tasksMissingEntity.length) / activities.length) * 100);
+
+  // Overall Weighted Governance Score
+  const globalScore = Math.round((r1Score * 0.25) + (r2Score * 0.25) + (r3Score * 0.2) + (r4Score * 0.15) + (r5Score * 0.15));
+
+  let scoreColor = '#10b981';
+  let scoreBadge = 'Excellent (Conforme Bouygues Telecom)';
+  if (globalScore < 60) {
+    scoreColor = '#ef4444';
+    scoreBadge = 'Critique : Non conforme aux exigences PMG';
+  } else if (globalScore < 85) {
+    scoreColor = '#f59e0b';
+    scoreBadge = 'Moyen : Améliorations recommandées';
+  }
+
+  let html = `
+    <!-- Carte Score Global -->
+    <div class="chart-card" style="padding:22px; margin-bottom:18px; border-left: 5px solid ${scoreColor};">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+        <div style="display:flex; align-items:center; gap:18px;">
+          <div style="width:72px; height:72px; border-radius:50%; background:radial-gradient(circle, ${scoreColor}22 0%, ${scoreColor}05 70%); border: 3px solid ${scoreColor}; display:flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 0 14px ${scoreColor}44;">
+            <span style="font-size:22px; font-weight:800; color:${scoreColor}; line-height:1;">${globalScore}%</span>
+            <span style="font-size:9px; font-weight:700; color:#64748b; text-transform:uppercase;">Score</span>
+          </div>
+          <div>
+            <h3 style="margin:0 0 4px; font-size:17px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+              🛡️ Audit de Santé &amp; Conformité Gouvernance PMG
+              <span class="badge" style="background:${scoreColor}15; color:${scoreColor}; border:1px solid ${scoreColor}44; font-size:11px; padding:3px 8px;">${scoreBadge}</span>
+            </h3>
+            <p style="margin:0; font-size:12.5px; color:var(--text-secondary);">
+              Évaluation automatique de 5 règles qualité indispensables pour la certification et le passage en production des matrices PMG.
+            </p>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button class="btn-primary" style="padding:8px 16px; font-size:12px; font-weight:700; display:flex; align-items:center; gap:6px;" onclick="autoFillPmgMissingDoc(); renderPmgGovernanceAudit('${containerId}');">
+            ⚡ Tout Corriger / Auto-Compléter (1-Clic)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grille des 5 Règles de Gouvernance -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px; margin-bottom:18px;">
+      
+      <!-- Règle 1: Candidate Groups -->
+      <div class="pmg-gov-card">
+        <div class="pmg-gov-header">
+          <div class="pmg-gov-rule-title">
+            <span>👤</span> Règle 1 : Rôles &amp; Candidate Groups
+          </div>
+          <span class="pmg-badge-${r1Score >= 80 ? 'ok' : (r1Score >= 50 ? 'warn' : 'warn')}">${r1Score}%</span>
+        </div>
+        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+          Toutes les <em>User Tasks</em> doivent déclarer un groupe d'utilisateurs éligible (<code>camunda:candidateGroups</code>).
+        </div>
+        <div style="font-size:11.5px;">
+          ${userTasksMissingGroup.length === 0 
+            ? '<span style="color:var(--ok);">✅ Toutes les User Tasks ont un groupe candidat.</span>' 
+            : `<div style="color:var(--warn); margin-bottom:6px;">⚠️ <strong>${userTasksMissingGroup.length} User Task(s) sans groupe :</strong> ${userTasksMissingGroup.map(u => `<code>${escHtml(u.name)}</code>`).slice(0, 3).join(', ')}${userTasksMissingGroup.length > 3 ? '...' : ''}</div>
+               <button class="btn-ghost" style="font-size:11px; padding:4px 8px; border:1px solid var(--brand-primary); color:var(--brand-primary);" onclick="autoFixPmgUserGroups(); renderPmgGovernanceAudit('${containerId}');">✨ Affecter automatiquement depuis les Lanes</button>`
+          }
+        </div>
+      </div>
+
+      <!-- Règle 2: Data Lineage Continuity -->
+      <div class="pmg-gov-card">
+        <div class="pmg-gov-header">
+          <div class="pmg-gov-rule-title">
+            <span>🔄</span> Règle 2 : Continuité Flux &amp; Lineage I/O
+          </div>
+          <span class="pmg-badge-${r2Score >= 70 ? 'ok' : 'warn'}">${r2Score}%</span>
+        </div>
+        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+          Chaque activité doit consommer (Input) ou générer (Output) au moins une variable métier.
+        </div>
+        <div style="font-size:11.5px;">
+          ${tasksMissingIo.length === 0 
+            ? '<span style="color:var(--ok);">✅ Lignage de données complet sur 100% des tâches.</span>' 
+            : `<span style="color:var(--warn);">⚠️ <strong>${tasksMissingIo.length} activité(s)</strong> sans variable I/O associée.</span>`
+          }
+        </div>
+      </div>
+
+      <!-- Règle 3: Applicability Conditions -->
+      <div class="pmg-gov-card">
+        <div class="pmg-gov-header">
+          <div class="pmg-gov-rule-title">
+            <span>🔀</span> Règle 3 : Conditions &amp; Cas Déclencheurs
+          </div>
+          <span class="pmg-badge-${r3Score >= 80 ? 'ok' : 'warn'}">${r3Score}%</span>
+        </div>
+        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+          La colonne <em>Applicable dans quel cas ?</em> doit être explicitée (nominal, exceptions, branches FEEL).
+        </div>
+        <div style="font-size:11.5px;">
+          ${tasksMissingCase.length === 0 
+            ? '<span style="color:var(--ok);">✅ 100% des tâches ont leur condition renseignée.</span>' 
+            : `<div style="color:var(--warn); margin-bottom:6px;">⚠️ <strong>${tasksMissingCase.length} tâche(s)</strong> sans condition.</div>
+               <button class="btn-ghost" style="font-size:11px; padding:4px 8px; border:1px solid var(--brand-primary); color:var(--brand-primary);" onclick="autoFillPmgMissingDoc(); renderPmgGovernanceAudit('${containerId}');">✨ Suggérer les conditions manquantes</button>`
+          }
+        </div>
+      </div>
+
+      <!-- Règle 4: Realization Modes -->
+      <div class="pmg-gov-card">
+        <div class="pmg-gov-header">
+          <div class="pmg-gov-rule-title">
+            <span>⚙️</span> Règle 4 : Modes de Réalisation Standard
+          </div>
+          <span class="pmg-badge-${r4Score >= 90 ? 'ok' : 'warn'}">${r4Score}%</span>
+        </div>
+        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+          Les modes doivent appartenir au référentiel Bouygues Telecom (<em>SP0, Call Activity, Manuelle, Automatique</em>).
+        </div>
+        <div style="font-size:11.5px;">
+          ${tasksInvalidMode.length === 0 
+            ? '<span style="color:var(--ok);">✅ Tous les modes de réalisation sont conformes.</span>' 
+            : `<div style="color:var(--warn); margin-bottom:6px;">⚠️ <strong>${tasksInvalidMode.length} tâche(s)</strong> avec mode non standard.</div>
+               <button class="btn-ghost" style="font-size:11px; padding:4px 8px; border:1px solid var(--ok); color:var(--ok);" onclick="autoHarmonizePmgModes(); renderPmgGovernanceAudit('${containerId}');">🪄 Harmoniser vers le standard</button>`
+          }
+        </div>
+      </div>
+
+      <!-- Règle 5: Lanes & Entities Assignment -->
+      <div class="pmg-gov-card">
+        <div class="pmg-gov-header">
+          <div class="pmg-gov-rule-title">
+            <span>🏢</span> Règle 5 : Affectation des Pools &amp; Lanes
+          </div>
+          <span class="pmg-badge-${r5Score >= 85 ? 'ok' : 'warn'}">${r5Score}%</span>
+        </div>
+        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+          Aucune tâche ne doit rester sans entité ou rôle responsable (<em>Non défini</em>).
+        </div>
+        <div style="font-size:11.5px;">
+          ${tasksMissingEntity.length === 0 
+            ? '<span style="color:var(--ok);">✅ 100% des activités sont affectées à une entité métier.</span>' 
+            : `<span style="color:var(--warn);">⚠️ <strong>${tasksMissingEntity.length} tâche(s)</strong> orphelines sans Lane définie.</span>`
+          }
+        </div>
+      </div>
+
+    </div>
+  `;
+
+  container.innerHTML = html;
+};
+
+window.autoFixPmgUserGroups = function() {
+  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
+  let fixed = 0;
+  activities.forEach(act => {
+    if ((act.type || '').toLowerCase().includes('user') && (!act.userGroup || act.userGroup.trim() === '')) {
+      const entClean = (act.entity && act.entity !== 'Non défini' ? act.entity : 'Operateurs')
+        .replace(/[^a-zA-Z0-9]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+      act.userGroup = `Gestionnaires_${entClean || 'Metier'}`;
+      act.userGroupWarning = false;
+      fixed++;
+    }
+  });
+  if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
+  if (window.renderPmgMatrix) window.renderPmgMatrix();
+  if (window.renderAllPmgStepKpis) window.renderAllPmgStepKpis();
+  window.savePmgStateToLocalStorage();
+  alert(`✅ ${fixed} groupe(s) candidat(s) assigné(s) automatiquement aux User Tasks.`);
+};
+
+window.autoHarmonizePmgModes = function() {
+  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
+  let fixed = 0;
+  activities.forEach(act => {
+    const isSub = (act.type || '').toLowerCase().includes('sous-processus') || (act.type || '').toLowerCase().includes('call');
+    const isUser = (act.type || '').toLowerCase().includes('user');
+    if (isSub) act.realizationMode = 'Call Activity';
+    else if (isUser) act.realizationMode = 'Manuelle';
+    else act.realizationMode = 'Automatique';
+    fixed++;
+  });
+  if (window.renderPmgStep4ManualTable) window.renderPmgStep4ManualTable();
+  if (window.renderPmgMatrix) window.renderPmgMatrix();
+  if (window.renderAllPmgStepKpis) window.renderAllPmgStepKpis();
+  window.savePmgStateToLocalStorage();
+  alert(`🪄 ${fixed} mode(s) de réalisation harmonisé(s) selon le type BPMN.`);
+};
+
+// =========================================================================
+// FEATURE 3: MATRICE RACI DYNAMIQUE & ANALYSE DES HAND-OFFS
+// =========================================================================
+
+window.renderPmgRaciMatrix = function(containerId = 'pmgRaciContainer') {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
+  if (activities.length === 0) {
+    container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-tertiary);">Chargez des processus BPMN pour générer la Matrice RACI.</div>';
+    return;
+  }
+
+  // 1. Identify all unique roles / entities (Columns)
+  const entitySet = new Set();
+  activities.forEach(a => {
+    if (a.entity && a.entity.trim().length > 0 && a.entity !== 'Non défini') entitySet.add(a.entity);
+  });
+  const entities = Array.from(entitySet);
+  if (entities.length === 0) entities.push('Direction Métier');
+
+  // Process Owner (Accountable default)
+  const owner = window.pmgProcessDetails?.owner || 'Direction Métier (Process Owner)';
+  if (!entities.includes(owner) && owner !== 'Non défini') {
+    entities.unshift(owner);
+  }
+
+  // 2. Compute Hand-offs (Transitions between different entities)
+  let handOffCount = 0;
+  const handOffPairs = [];
+  for (let i = 0; i < activities.length - 1; i++) {
+    const curEnt = activities[i].entity || 'Non défini';
+    const nextEnt = activities[i + 1].entity || 'Non défini';
+    if (curEnt !== nextEnt && curEnt !== 'Non défini' && nextEnt !== 'Non défini') {
+      handOffCount++;
+      handOffPairs.push(`${curEnt} ➔ ${nextEnt}`);
+    }
+  }
+
+  // 3. Build RACI Mapping
+  // Producer map: varName -> entity that produces it
+  const varProducerMap = new Map();
+  activities.forEach(a => {
+    (a.outputs || []).forEach(outVar => {
+      const v = getVarName(outVar);
+      if (v && a.entity) varProducerMap.set(v, a.entity);
+    });
+  });
+
+  // Table headers
+  let headersHtml = `<th style="padding:8px; min-width:180px; text-align:left;">Activité / Tâche BPMN</th>`;
+  entities.forEach(ent => {
+    headersHtml += `<th style="padding:8px; min-width:120px; text-align:center;">${escHtml(ent)}</th>`;
+  });
+
+  // Table rows
+  let rowsHtml = '';
+  activities.forEach((act, idx) => {
+    const isSub = (act.type || '').toLowerCase().includes('sous-processus') || (act.type || '').toLowerCase().includes('call');
+    const actEntity = act.entity || 'Non défini';
+
+    let cellsHtml = '';
+    entities.forEach(ent => {
+      const raciRoles = [];
+
+      // R (Responsible): The entity executing this activity
+      if (ent === actEntity) {
+        raciRoles.push('<span class="pmg-raci-tag pmg-raci-tag-r" title="Responsible (Réalise la tâche)">R</span>');
+      }
+
+      // A (Accountable): Process Owner or Lane Owner
+      if (ent === owner || (entities.length === 1 && ent === actEntity)) {
+        raciRoles.push('<span class="pmg-raci-tag pmg-raci-tag-a" title="Accountable (Rend des comptes)">A</span>');
+      }
+
+      // C (Consulted): Entity that provided input variables
+      const inputs = act.inputs || [];
+      const isConsulted = inputs.some(inVar => {
+        const prodEnt = varProducerMap.get(getVarName(inVar));
+        return prodEnt === ent && ent !== actEntity;
+      });
+      if (isConsulted) {
+        raciRoles.push('<span class="pmg-raci-tag pmg-raci-tag-c" title="Consulted (Fournit les données en entrée)">C</span>');
+      }
+
+      // I (Informed): Entity that consumes outputs of this activity in downstream tasks
+      const outputs = act.outputs || [];
+      const isInformed = activities.slice(idx + 1).some(downAct => {
+        if (downAct.entity === ent && ent !== actEntity) {
+          return (downAct.inputs || []).some(inVar => outputs.some(outVar => getVarName(outVar) === getVarName(inVar)));
+        }
+        return false;
+      });
+      if (isInformed) {
+        raciRoles.push('<span class="pmg-raci-tag pmg-raci-tag-i" title="Informed (Consomme les résultats produits)">I</span>');
+      }
+
+      cellsHtml += `<td style="padding:6px; text-align:center;">${raciRoles.length > 0 ? raciRoles.join('') : '<span style="color:#cbd5e1;">—</span>'}</td>`;
+    });
+
+    const indent = (act.level && act.level > 1) ? (act.level - 1) * 12 : 0;
+
+    rowsHtml += `
+      <tr style="border-bottom: 1px solid var(--border-color);">
+        <td style="padding:8px 8px 8px ${indent + 8}px;">
+          <div style="font-weight:600; color:var(--text-primary);">${escHtml(act.name)}</div>
+          <span style="font-size:10.5px; color:var(--text-tertiary);">${escHtml(act.typeLabel || act.type)} (${escHtml(act.id)})</span>
+        </td>
+        ${cellsHtml}
+      </tr>
+    `;
+  });
+
+  html = `
+    <!-- Carte KPI RACI & Hand-offs -->
+    <div class="chart-card" style="padding:18px; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h4 style="margin:0 0 4px; font-size:15px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+            👥 Matrice des Responsabilités RACI &amp; Analyse des Passations (Hand-Offs)
+          </h4>
+          <div style="font-size:12px; color:var(--text-secondary);">
+            Générée automatiquement par croisement des Lanes BPMN et du lignage des flux de données I/O.
+          </div>
+        </div>
+        <div style="display:flex; gap:12px; align-items:center;">
+          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px; display:flex; align-items:center; gap:6px;">
+            🔀 Passations Inter-Équipes : <strong style="color:${handOffCount > 5 ? 'var(--warn)' : 'var(--ok)'};">${handOffCount} Hand-offs</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- Légende RACI -->
+      <div style="display:flex; gap:14px; margin-top:12px; flex-wrap:wrap; font-size:11.5px; padding-top:10px; border-top:1px solid var(--border-color);">
+        <div style="display:flex; align-items:center; gap:6px;"><span class="pmg-raci-tag pmg-raci-tag-r">R</span> <strong>Responsible</strong> (Réalisateur direct)</div>
+        <div style="display:flex; align-items:center; gap:6px;"><span class="pmg-raci-tag pmg-raci-tag-a">A</span> <strong>Accountable</strong> (Responsable / Décideur)</div>
+        <div style="display:flex; align-items:center; gap:6px;"><span class="pmg-raci-tag pmg-raci-tag-c">C</span> <strong>Consulted</strong> (Fournisseur de données en amont)</div>
+        <div style="display:flex; align-items:center; gap:6px;"><span class="pmg-raci-tag pmg-raci-tag-i">I</span> <strong>Informed</strong> (Destinataire / Consommateur aval)</div>
+      </div>
+    </div>
+
+    <!-- Tableau RACI -->
+    <div class="tbl-wrap" style="max-height:480px; overflow-y:auto; border:1px solid var(--border-color); border-radius:var(--border-radius-md);">
+      <table style="width:100%; font-size:12px;">
+        <thead>
+          <tr style="background:#002060; color:#ffffff;">
+            ${headersHtml}
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  container.innerHTML = html;
+};
+
+// =========================================================================
+// FEATURE 4: MATRICE CROISÉE FLUX DE DONNÉES (I/O CROSS-TABLE)
+// =========================================================================
+
+window.renderPmgIoCrossMatrix = function(containerId = 'pmgIoCrossContainer') {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
+  if (activities.length === 0) {
+    container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-tertiary);">Chargez des processus BPMN pour afficher la matrice croisée des flux.</div>';
+    return;
+  }
+
+  // 1. Collect all unique clean variables
+  const varSet = new Set();
+  activities.forEach(a => {
+    (a.inputs || []).forEach(v => { const n = getVarName(v); if (n) varSet.add(n); });
+    (a.outputs || []).forEach(v => { const n = getVarName(v); if (n) varSet.add(n); });
+  });
+  const variables = Array.from(varSet).sort();
+
+  if (variables.length === 0) {
+    container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-tertiary);">Aucune variable d\'entrée ou de sortie détectée dans le lot BPMN.</div>';
+    return;
+  }
+
+  // 2. Identify Orphaned Variables (Produced but never consumed, or Consumed with no upstream producer)
+  const producersMap = new Map();
+  const consumersMap = new Map();
+
+  variables.forEach(v => {
+    producersMap.set(v, []);
+    consumersMap.set(v, []);
+  });
+
+  activities.forEach(a => {
+    (a.inputs || []).forEach(inVar => {
+      const v = getVarName(inVar);
+      if (consumersMap.has(v)) consumersMap.get(v).push(a.name);
+    });
+    (a.outputs || []).forEach(outVar => {
+      const v = getVarName(outVar);
+      if (producersMap.has(v)) producersMap.get(v).push(a.name);
+    });
+  });
+
+  let neverConsumedCount = 0;
+  let noProducerCount = 0;
+  variables.forEach(v => {
+    if (producersMap.get(v).length > 0 && consumersMap.get(v).length === 0) neverConsumedCount++;
+    if (consumersMap.get(v).length > 0 && producersMap.get(v).length === 0) noProducerCount++;
+  });
+
+  // 3. Build Table Headers
+  let headersHtml = `<th style="padding:8px; min-width:180px; text-align:left; position:sticky; left:0; background:#002060; z-index:2;">Activité (Ligne)</th>`;
+  variables.forEach(v => {
+    headersHtml += `<th style="padding:8px; min-width:100px; text-align:center; font-family:var(--font-mono, monospace); font-size:11px;">${escHtml(v)}</th>`;
+  });
+
+  // 4. Build Table Rows
+  let rowsHtml = '';
+  activities.forEach(act => {
+    const inSet = new Set((act.inputs || []).map(getVarName));
+    const outSet = new Set((act.outputs || []).map(getVarName));
+
+    let cellsHtml = '';
+    variables.forEach(v => {
+      const isIn = inSet.has(v);
+      const isOut = outSet.has(v);
+
+      if (isIn && isOut) {
+        cellsHtml += `<td style="padding:6px; text-align:center;"><span class="pmg-cross-tag pmg-cross-tag-es" title="Entrée et Sortie (Transformateur)">E/S</span></td>`;
+      } else if (isOut) {
+        cellsHtml += `<td style="padding:6px; text-align:center;"><span class="pmg-cross-tag pmg-cross-tag-s" title="Sortie (Producteur)">🟢 Sortie</span></td>`;
+      } else if (isIn) {
+        cellsHtml += `<td style="padding:6px; text-align:center;"><span class="pmg-cross-tag pmg-cross-tag-e" title="Entrée (Consommateur)">🔵 Entrée</span></td>`;
+      } else {
+        cellsHtml += `<td style="padding:6px; text-align:center; color:#e2e8f0;">—</td>`;
+      }
+    });
+
+    rowsHtml += `
+      <tr style="border-bottom: 1px solid var(--border-color);">
+        <td style="padding:8px; position:sticky; left:0; background:var(--bg-card); font-weight:600; z-index:1; border-right:1px solid var(--border-color);">
+          ${escHtml(act.name)}
+          <br><span style="font-size:10px; color:var(--text-tertiary);">${escHtml(act.entity || '')}</span>
+        </td>
+        ${cellsHtml}
+      </tr>
+    `;
+  });
+
+  html = `
+    <!-- En-tête et Métriques -->
+    <div class="chart-card" style="padding:18px; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h4 style="margin:0 0 4px; font-size:15px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+            🔄 Matrice Croisée Flux de Données &amp; Traçabilité Lignage (Producer-Consumer Matrix)
+          </h4>
+          <div style="font-size:12px; color:var(--text-secondary);">
+            Visualisez qui produit (🟢 Sortie) et qui consomme (🔵 Entrée) chaque variable pour éliminer les ruptures de flux.
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
+            Variables Uniques : <strong>${variables.length}</strong>
+          </div>
+          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
+            ⚠️ Non consommées : <strong style="color:${neverConsumedCount > 0 ? 'var(--warn)' : 'var(--ok)'};">${neverConsumedCount}</strong>
+          </div>
+          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
+            📥 Entrées initiales : <strong>${noProducerCount}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tableau Croisé -->
+    <div class="tbl-wrap" style="max-height:480px; overflow:auto; border:1px solid var(--border-color); border-radius:var(--border-radius-md);">
+      <table style="width:100%; font-size:11.5px; border-collapse:collapse;">
+        <thead>
+          <tr style="background:#002060; color:#ffffff;">
+            ${headersHtml}
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  container.innerHTML = html;
+};
+
+// =========================================================================
+// FEATURE 5: EXPORT MULTI-FEUILLES EXCEL PRO (.XLSX) BOUYGUES TELECOM
+// =========================================================================
+
+window.exportPmgMultiSheetExcel = function() {
+  if (typeof XLSX === 'undefined') {
+    window.exportPmgExcel();
+    return;
+  }
+
+  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
+  if (activities.length === 0) {
+    alert("La matrice PMG est vide.");
+    return;
+  }
+
+  const processName = document.getElementById('pmgProcessNameStep')?.value || document.getElementById('pmgProcessName')?.value || 'Processus Principal';
+  const processId = document.getElementById('pmgProcessIdStep')?.value || document.getElementById('pmgProcessId')?.value || 'process-principal';
+  const owner = document.getElementById('pmgProcessOwnerStep')?.value || document.getElementById('pmgProcessOwner')?.value || 'Direction Métier';
+  const exporter = document.getElementById('pmgExporterStep')?.value || document.getElementById('pmgExporter')?.value || 'Modélisateur PMG';
+  const version = document.getElementById('pmgProcessVersionStep')?.value || document.getElementById('pmgProcessVersion')?.value || 'v1.0.0';
+
+  const wb = XLSX.utils.book_new();
+
+  // --- FEUILLE 1 : Synthèse Gouvernance ---
+  const ws1Data = [
+    ["BOUYGUES TELECOM - GOUVERNANCE DES PROCESSUS PMG"],
+    ["Rapport Officiel de Cartographie & Conformité"],
+    [],
+    ["MÉTADONNÉES DU PROCESSUS", ""],
+    ["Nom du Processus", processName],
+    ["ID Technique (Process ID)", processId],
+    ["Version", version],
+    ["Propriétaire Métier (Owner)", owner],
+    ["Modélisateur / Auteur", exporter],
+    ["Date d'exportation", new Date().toLocaleDateString('fr-FR')],
+    [],
+    ["STATISTIQUES CLÉS", ""],
+    ["Total Activités", activities.length],
+    ["User Tasks (Tâches Humaines)", activities.filter(a => (a.type || '').toLowerCase().includes('user')).length],
+    ["Services / Automatisations", activities.filter(a => (a.type || '').toLowerCase().includes('service')).length],
+    ["Sous-processus / Call Activities", activities.filter(a => (a.type || '').toLowerCase().includes('call') || (a.type || '').toLowerCase().includes('sous')).length]
+  ];
+  const ws1 = XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(ws1Data) : ws1Data);
+  XLSX.utils.book_append_sheet(wb, ws1, "1_Synthese_Gouvernance");
+
+  // --- FEUILLE 2 : Matrice PMG Officielle ---
+  const ws2Data = [
+    ["Activité / Call Activity", "ID Technique", "Type de Composant", "Entité / Lane Réalisatrice", "Groupe d'Utilisateurs", "Inputs (Entrées)", "Outputs (Sorties)", "Mode de Réalisation", "Applicable dans quel cas ?", "Commentaires / Documentation"]
+  ];
+  activities.forEach(act => {
+    ws2Data.push([
+      act.name,
+      act.id,
+      act.typeLabel || act.type,
+      act.entity || 'Non défini',
+      act.userGroup || '',
+      (act.inputs || []).join(', '),
+      (act.outputs || []).join(', '),
+      act.realizationMode || 'Manuelle',
+      act.applicableCase || '',
+      act.comment || ''
+    ]);
+  });
+  const ws2 = XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(ws2Data) : ws2Data);
+  XLSX.utils.book_append_sheet(wb, ws2, "2_Matrice_PMG_Officielle");
+
+  // --- FEUILLE 3 : Matrice RACI ---
+  const entitySet = new Set(activities.map(a => a.entity).filter(Boolean));
+  const entities = Array.from(entitySet);
+  if (entities.length === 0) entities.push('Direction Métier');
+
+  const ws3Header = ["Activité", "ID Technique", ...entities];
+  const ws3Data = [ws3Header];
+
+  activities.forEach(act => {
+    const row = [act.name, act.id];
+    entities.forEach(ent => {
+      let role = "";
+      if (ent === act.entity) role += "R ";
+      if (ent === owner) role += "A ";
+      row.push(role.trim() || "-");
+    });
+    ws3Data.push(row);
+  });
+  const ws3 = XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(ws3Data) : ws3Data);
+  XLSX.utils.book_append_sheet(wb, ws3, "3_Matrice_RACI");
+
+  // --- FEUILLE 4 : Dictionnaire & Lignage I/O ---
+  const varMap = new Map();
+  activities.forEach(act => {
+    (act.inputs || []).forEach(inVar => {
+      const v = getVarName(inVar);
+      if (!varMap.has(v)) varMap.set(v, { inTasks: [], outTasks: [] });
+      varMap.get(v).inTasks.push(act.name);
+    });
+    (act.outputs || []).forEach(outVar => {
+      const v = getVarName(outVar);
+      if (!varMap.has(v)) varMap.set(v, { inTasks: [], outTasks: [] });
+      varMap.get(v).outTasks.push(act.name);
+    });
+  });
+
+  const ws4Data = [
+    ["Nom de la Variable", "Producteurs (Écriture / Sorties)", "Consommateurs (Lecture / Entrées)", "Statut Lignage"]
+  ];
+  varMap.forEach((data, varName) => {
+    let status = "Complet (Produit & Consommé)";
+    if (data.outTasks.length === 0) status = "Entrée Initiale (Sans producteur amont)";
+    else if (data.inTasks.length === 0) status = "Sortie Finale (Non consommée)";
+
+    ws4Data.push([
+      varName,
+      data.outTasks.join(', ') || 'N/A',
+      data.inTasks.join(', ') || 'N/A',
+      status
+    ]);
+  });
+  const ws4 = XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(ws4Data) : ws4Data);
+  XLSX.utils.book_append_sheet(wb, ws4, "4_Dictionnaire_Variables_IO");
+
+  // Write and download .xlsx
+  XLSX.writeFile(wb, `pmg_gouvernance_${processId || 'process'}.xlsx`);
+};
+
