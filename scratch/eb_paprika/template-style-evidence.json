@@ -1,0 +1,130 @@
+{
+  "input": "C:\\Users\\ayoub.benkhiroun_ama\\Downloads\\Template_EB_RPA.docx",
+  "fonts_by_char_count": {
+    "Arial": 1788
+  },
+  "direct_run_formatting_runs": 513,
+  "direct_paragraph_formatting_paragraphs": 205,
+  "heading_like_paragraphs_not_heading_style": [
+    {
+      "para_index": 132,
+      "text": "R\u00e8gle de gestion 1 : R\u00e9cup\u00e9ration du fichier Input",
+      "style": "List Paragraph"
+    },
+    {
+      "para_index": 133,
+      "text": "R\u00e8gle de gestion 1 : R\u00e9cup\u00e9ration du fichier Input",
+      "style": "List Paragraph"
+    },
+    {
+      "para_index": 137,
+      "text": "R\u00e8gle de gestion 2\u00a0: Cr\u00e9ation des groupes d\u2019appels",
+      "style": "List Paragraph"
+    },
+    {
+      "para_index": 138,
+      "text": "R\u00e8gle de gestion 2\u00a0: Cr\u00e9ation des groupes d\u2019appels",
+      "style": "List Paragraph"
+    },
+    {
+      "para_index": 162,
+      "text": "NB\u00a0: Commencer avec le dernier groupe de l\u2019agence ",
+      "style": "List Paragraph"
+    },
+    {
+      "para_index": 202,
+      "text": "Cas1\u00a0: si OUI, rajouter les utilisateurs de la colonne L\u00a0",
+      "style": "Normal"
+    },
+    {
+      "para_index": 203,
+      "text": "Cas 2\u00a0: sinon faire \u00ab\u00a0suivant\u00a0\u00bb",
+      "style": "Normal"
+    },
+    {
+      "para_index": 205,
+      "text": "Cas 3\u00a0: Utiliser la colonne Q pour HNO",
+      "style": "Normal"
+    },
+    {
+      "para_index": 214,
+      "text": "NB\u00a0: Pour le HNO le choix est \u00ab\u00a0Num\u00e9ro\u00a0\u00bb",
+      "style": "Normal"
+    },
+    {
+      "para_index": 254,
+      "text": "R\u00e8gle de gestion 3\u00a0: G\u00e9n\u00e9ration Output & envoi de mail CR",
+      "style": "List Paragraph"
+    },
+    {
+      "para_index": 255,
+      "text": "R\u00e8gle de gestion 3\u00a0: G\u00e9n\u00e9ration Output & envoi de mail CR",
+      "style": "List Paragraph"
+    },
+    {
+      "para_index": 286,
+      "text": "NB\u00a0: En fonction du cas d\u2019exception remont\u00e9, le corps du mail CR diff\u00e8re",
+      "style": "Normal"
+    }
+  ],
+  "examples": {
+    "direct_run_formatting": [
+      {
+        "para_index": 1,
+        "run_text": "DETAILS DU PROCESSUS",
+        "style": "Heading 1"
+      },
+      {
+        "para_index": 2,
+        "run_text": "Objectifs du processus",
+        "style": "Heading 2"
+      },
+      {
+        "para_index": 4,
+        "run_text": " ",
+        "style": "Default"
+      },
+      {
+        "para_index": 4,
+        "run_text": "toute la partie relative \u00e0 la cr\u00e9ation des groupements fonctionnels et technique",
+        "style": "Default"
+      },
+      {
+        "para_index": 8,
+        "run_text": "Contacts cl\u00e9s",
+        "style": "Heading 2"
+      }
+    ],
+    "direct_paragraph_formatting": [
+      {
+        "para_index": 38,
+        "text": "",
+        "style": "Body Text"
+      },
+      {
+        "para_index": 39,
+        "text": "",
+        "style": "Body Text"
+      },
+      {
+        "para_index": 44,
+        "text": "",
+        "style": "Body Text"
+      },
+      {
+        "para_index": 65,
+        "text": "Merci de prendre en compte toutes les \u00e9tapes (\u00e9tapes principales, sous \u00e9tapes\u2026) du processus dans le diagramme.",
+        "style": "Normal"
+      },
+      {
+        "para_index": 66,
+        "text": "",
+        "style": "Normal"
+      }
+    ]
+  },
+  "notes": [
+    "Direct formatting is not always wrong, but it often causes inconsistent output when templates change.",
+    "Heading-like paragraphs not using Heading styles can break TOC and accessibility."
+  ]
+}

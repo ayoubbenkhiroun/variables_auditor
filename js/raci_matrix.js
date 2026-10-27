@@ -998,7 +998,7 @@
       data.push(row);
     });
 
-    const ws = XLSX.utils.aoa_to_sheet(data);
+    const ws = XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(data) : data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Matrice RACI");
 

@@ -740,8 +740,17 @@
     const allElementsSet = new Set();
     const coveredElementsSet = new Set();
     testGenFiles.forEach(f => {
-      if (f.xmlDoc) {
-        f.xmlDoc.querySelectorAll('task, serviceTask, userTask, scriptTask, exclusiveGateway, inclusiveGateway, boundaryEvent, endEvent').forEach(el => {
+      if (f && f.xmlDoc) {
+        Array.from(f.xmlDoc.querySelectorAll('task, bpmn\\:task, serviceTask, bpmn\\:serviceTask, userTask, bpmn\\:userTask, scriptTask, bpmn\\:scriptTask, exclusiveGateway, bpmn\\:exclusiveGateway, inclusiveGateway, bpmn\\:inclusiveGateway, boundaryEvent, bpmn\\:boundaryEvent, endEvent, bpmn\\:endEvent')).filter(el => {
+          if (el.prefix === 'zeebe' || el.prefix === 'camunda' || el.prefix === 'modeler') return false;
+          let p = el.parentElement;
+          while (p && p.nodeType === 1) {
+            const pLn = (p.localName || '').toLowerCase();
+            if (pLn === 'extensionelements' || pLn === 'extension_elements') return false;
+            p = p.parentElement;
+          }
+          return true;
+        }).forEach(el => {
           const id = el.getAttribute('id');
           if (id) allElementsSet.add(id);
         });
@@ -1457,7 +1466,7 @@ Fonctionnalité: Validation et Recette du Processus BPMN ${firstProc.processName
       ['Cas d\'Erreurs & Exceptions', currentTestScenarios.filter(s => s.type === 'error').length],
       ['Fichiers BPMN inclus', testGenFiles.map(f => f.fileName).join(', ')]
     ];
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+    const wsSummary = XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(summaryData) : summaryData);
     XLSX.utils.book_append_sheet(wb, wsSummary, 'Synthèse');
 
     // 2. Feuille Détail des Scénarios de Recette
@@ -1487,7 +1496,7 @@ Fonctionnalité: Validation et Recette du Processus BPMN ${firstProc.processName
       ''
     ]);
 
-    const wsDetails = XLSX.utils.aoa_to_sheet([detailHeaders, ...detailRows]);
+    const wsDetails = XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA([detailHeaders, ...detailRows]) : [detailHeaders, ...detailRows]);
     XLSX.utils.book_append_sheet(wb, wsDetails, 'Scénarios de Recette');
 
     XLSX.writeFile(wb, `Cahier_Recette_BPMN_Bouygues_${Date.now()}.xlsx`);
@@ -1511,9 +1520,9 @@ Fonctionnalité: Validation et Recette du Processus BPMN ${firstProc.processName
       s.assertions.join('; ').replace(/"/g, '""')
     ]);
 
-    let csvContent = headers.join(';') + '\n';
+    let csvContent = headers.map(h => `"${(window.sanitizeFormula ? window.sanitizeFormula(h) : h)}"`).join(';') + '\n';
     rows.forEach(r => {
-      csvContent += r.map(cell => `"${cell}"`).join(';') + '\n';
+      csvContent += r.map(cell => `"${(window.sanitizeFormula ? window.sanitizeFormula(cell) : cell)}"`).join(';') + '\n';
     });
 
     downloadFile(csvContent, `bpmn_scenarios_${Date.now()}.csv`, 'text/csv;charset=utf-8');

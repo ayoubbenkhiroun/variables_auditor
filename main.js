@@ -14,7 +14,8 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: true
+      webSecurity: true,
+      sandbox: true
     },
     autoHideMenuBar: true,
     show: false
@@ -27,19 +28,44 @@ function createWindow() {
     mainWindow.show();
   });
 
-  // Ouvrir les liens externes dans le navigateur par défaut de l'utilisateur
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http:') || url.startsWith('https:')) {
-      shell.openExternal(url);
-      return { action: 'deny' };
+  // Interdire la navigation vers des URLs externes non souhaitées dans la fenêtre principale
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    try {
+      const parsed = new URL(navigationUrl);
+      if (parsed.protocol === 'file:') return; // Autoriser la navigation locale
+    } catch (e) { }
+    event.preventDefault();
+    if (navigationUrl.startsWith('http:') || navigationUrl.startsWith('https:')) {
+      shell.openExternal(navigationUrl);
     }
-    return { action: 'allow' };
   });
+
+  // Ouvrir les liens externes dans le navigateur par défaut en refusant strictement toute autre création de fenêtre
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url && (url.startsWith('http:') || url.startsWith('https:'))) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
+  // Refuser toutes les demandes de permissions matérielles/sensibles non nécessaires
+  if (mainWindow.webContents.session) {
+    mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+      callback(false);
+    });
+  }
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
+
+// Empêcher l'attachement non sollicité de balises webview
+app.on('web-contents-created', (event, contents) => {
+  contents.on('will-attach-webview', (webviewEvent) => {
+    webviewEvent.preventDefault();
+  });
+});
 
 app.whenReady().then(() => {
   createWindow();

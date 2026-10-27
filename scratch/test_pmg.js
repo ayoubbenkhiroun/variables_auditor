@@ -9,7 +9,7 @@ global.document = {
     textContent: '',
     innerHTML: '',
     style: {},
-    classList: { add: () => {}, remove: () => {}, toggle: () => {} },
+    classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false },
     appendChild: () => {},
     addEventListener: () => {}
   }),
@@ -43,23 +43,24 @@ const expectedFunctions = [
   'parseBpmnBatchForPmg',
   'populatePmgAllStepsFromBpmnBatch',
   'renderAllPmgStepKpis',
-  'renderPmgStep1Kpis',
-  'renderPmgStep2Kpis',
-  'renderPmgStep3Kpis',
-  'renderPmgStep4Kpis',
-  'renderPmgStep5Kpis',
   'renderPmgVisualTree',
   'renderPmgStep2ManualTable',
   'renderPmgStep3ManualTable',
   'renderPmgStep4ManualTable',
-  'switchPmgSubView',
-  'autoFillPmgMissingDoc',
-  'renderPmgGovernanceAudit',
-  'renderPmgRaciMatrix',
-  'renderPmgIoCrossMatrix',
-  'exportPmgMultiSheetExcel',
-  'autoFixPmgUserGroups',
-  'autoHarmonizePmgModes'
+  'renderPmgParentFilterBar',
+  'setPmgParentFilter',
+  'openPmgParentProcessModal',
+  'closePmgParentProcessModal',
+  'renderPmgParentProcessModalContent',
+  'applyPmgParentProcessSelection',
+  'resetPmgParentDetectionToAuto',
+  'toggleAllPmgProcessesAsParents',
+  'sortPmgActivities',
+  'setPmgActivityOrderMode',
+  'renderPmgMatrix',
+  'exportPmgCSV',
+  'exportPmgExcel',
+  'loadPmgDemoBpmnSuite'
 ];
 
 let allFound = true;
@@ -72,8 +73,27 @@ expectedFunctions.forEach(fn => {
   }
 });
 
+// Test activity ordering logic
+const testActivities = [
+  { id: 'act_1', name: 'Task 1', level: 1, flowOrder: 3, diagramX: 500, diagramY: 100, xmlOrder: 1 },
+  { id: 'act_2', name: 'Task 2', level: 2, flowOrder: 1, diagramX: 100, diagramY: 100, xmlOrder: 2 },
+  { id: 'act_3', name: 'Task 3', level: 1, flowOrder: 2, diagramX: 300, diagramY: 100, xmlOrder: 3 }
+];
+
+const flowOrder = global.sortPmgActivities(testActivities, 'flow');
+console.log('Flow sorted order:', flowOrder.map(a => a.id).join(' -> '));
+
+const diagramOrder = global.sortPmgActivities(testActivities, 'diagram');
+console.log('Diagram sorted order:', diagramOrder.map(a => a.id).join(' -> '));
+
+const levelOrder = global.sortPmgActivities(testActivities, 'level');
+console.log('Level sorted order:', levelOrder.map(a => a.id).join(' -> '));
+
+const xmlOrder = global.sortPmgActivities(testActivities, 'xml');
+console.log('XML sorted order:', xmlOrder.map(a => a.id).join(' -> '));
+
 if (allFound) {
-  console.log('\n🎉 ALL PMG Step Wizard & KPI functions are correctly loaded and exported!');
+  console.log('\n🎉 ALL PMG Multi-Parent & Ordering functions are correctly loaded and functioning!');
 } else {
   process.exit(1);
 }

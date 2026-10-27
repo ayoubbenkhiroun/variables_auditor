@@ -73,11 +73,18 @@ function dl(content, filename, mime) {
 }
 window.dl = dl;
 
-// Limite maximale de taille de fichier autorisée (25 Mo)
-const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+// Limite maximale de taille de fichier autorisée (50 Mo)
+window.MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 function validateFileSize(file) {
-  if (file && file.size > MAX_FILE_SIZE_BYTES) {
-    alert(`Le fichier "${file.name}" dépasse la limite de sécurité autorisée de 25 Mo (taille: ${(file.size / (1024 * 1024)).toFixed(1)} Mo).`);
+  if (!file) return false;
+  if (file.size > window.MAX_FILE_SIZE_BYTES) {
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+    const msg = `⚠️ Limite de taille : Le fichier "${file.name}" fait ${sizeMb} Mo (limite : 50 Mo).`;
+    if (typeof showToast === 'function') {
+      showToast(msg, 'error');
+    } else {
+      alert(msg);
+    }
     return false;
   }
   return true;
@@ -2107,12 +2114,10 @@ function switchTab(name, skipLoader = false){
     'sub-import': 'Importation des Sous-processus',
     'sub-analysis': 'Analyse d\'Impact des Sous-processus',
     'sub-map': 'Cartographie des Call Activities',
-    'bpmn-naming-import': 'Importation du BPMN (Nommage)',
-    'bpmn-naming-config': 'Configuration des Règles de Nommage',
-    'bpmn-naming-results': 'Rapport d\'Audit de Nommage BPMN',
-    'bpmn-lint-import': 'Audit Santé BPMN — Import & Analyse',
-    'bpmn-lint-rules': 'Audit Santé BPMN — Règles Lint',
-    'bpmn-lint-results': 'Audit Santé BPMN — Rapport de Santé',
+    'bpmn-lint-import': 'Audit & Santé BPMN — Import & Analyse',
+    'bpmn-lint-rules': 'Audit & Santé BPMN — Règles & Conventions',
+    'bpmn-lint-results': 'Audit & Santé BPMN — Rapport de Santé',
+    'bpmn-lint-landscape': 'Audit & Santé BPMN — Cartographie Globale d\'Orchestration 3D/2D',
     'pmg-import': 'Importation du BPMN (PMG)',
     'pmg-dashboard': 'Étude & Gouvernance PMG',
     'pmg-matrix': 'Matrice des Activités PMG',
@@ -2162,7 +2167,22 @@ function switchTab(name, skipLoader = false){
       renderDuplicatesUI();
     } else if (name === 'test-gen') {
       if (typeof initTestGenModule === 'function') initTestGenModule();
+    } else if (name === 'bpmn-lint-landscape') {
+      if (typeof renderBpmnLintLandscape === 'function') renderBpmnLintLandscape();
     }
+
+    // Remettre le défilement en haut de page à chaque changement d'onglet/module
+    const scrollTargets = [
+      document.querySelector('.panels-container'),
+      document.querySelector('.main-content'),
+      document.querySelector('main'),
+      document.documentElement,
+      document.body
+    ];
+    scrollTargets.forEach(el => {
+      if (el) el.scrollTop = 0;
+    });
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   };
 
   if (!skipLoader) {
@@ -2340,6 +2360,10 @@ async function handleBPMNFiles(files) {
 }
 
 function parseSingleBpmnDoc(xmlText, fileName) {
+  // Utiliser le parseur robuste Camunda 8 si disponible
+  if (typeof BpmnZeebeParser !== 'undefined' && typeof BpmnZeebeParser.parseDocument === 'function') {
+    return BpmnZeebeParser.parseDocument(xmlText, fileName);
+  }
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(xmlText, "application/xml");
   const parserError = xmlDoc.querySelector('parsererror');
@@ -2380,7 +2404,7 @@ function parseSingleBpmnDoc(xmlText, fileName) {
     }
     cleanExpr = cleanExpr.replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, '')
                          .replace(/'[^'\\]*(?:\\.[^'\\]*)*'/g, '');
-    const matches = cleanExpr.match(/\b[a-zA-Z_][a-zA-Z0-9_]*\b/g);
+    const matches = cleanExpr.match(/[\p{L}_][\p{L}\p{N}_]*/gu);
     if (!matches) return [];
     return Array.from(new Set(matches)).filter(w => !IGNORED_IDENTIFIERS.has(w.toLowerCase()));
   }
@@ -2388,7 +2412,7 @@ function parseSingleBpmnDoc(xmlText, fileName) {
   function getParentProcessInfo(node) {
     let parent = node.parentNode;
     while (parent) {
-      const ln = (parent.localName || '').toLowerCase();
+      const ln = (parent.localName || parent.tagName?.split(':').pop() || '').toLowerCase();
       if (ln === 'process') {
         const id = parent.getAttribute('id') || '';
         const name = parent.getAttribute('name') || '';
@@ -2402,11 +2426,11 @@ function parseSingleBpmnDoc(xmlText, fileName) {
   function getTaskInfo(node) {
     let parent = node.parentNode;
     while (parent) {
-      const ln = (parent.localName || '').toLowerCase();
+      const ln = (parent.localName || parent.tagName?.split(':').pop() || '').toLowerCase();
       if (['servicetask', 'usertask', 'scripttask', 'sendtask', 'receivetask', 'manualtask', 'businessruletask', 'callactivity', 'subprocess', 'startevent', 'endevent', 'intermediatecatchevent', 'intermediatethrowevent', 'boundaryevent'].includes(ln)) {
         const id = parent.getAttribute('id') || '';
         const name = parent.getAttribute('name') || '';
-        const typeLabel = parent.localName;
+        const typeLabel = parent.localName || parent.tagName?.split(':').pop() || ln;
         return { id, name, type: typeLabel, label: name ? `${typeLabel}: ${name} (${id})` : `${typeLabel}: ${id}` };
       }
       parent = parent.parentNode;
@@ -2419,10 +2443,23 @@ function parseSingleBpmnDoc(xmlText, fileName) {
 
   for (let i = 0; i < allElements.length; i++) {
     const el = allElements[i];
-    const localName = (el.localName || '').toLowerCase();
+    const localName = (el.localName || el.tagName?.split(':').pop() || '').toLowerCase();
+    
+    // Déterminer si l'élément est une balise technique d'extension ou situé dans <extensionElements>
+    const isExtensionTag = el.prefix === 'zeebe' || el.prefix === 'camunda' || el.prefix === 'modeler';
+    let isInsideExtensionElements = false;
+    let pNode = el.parentElement;
+    while (pNode && pNode.nodeType === 1) {
+      const pLn = (pNode.localName || pNode.tagName?.split(':').pop() || '').toLowerCase();
+      if (pLn === 'extensionelements' || pLn === 'extension_elements') {
+        isInsideExtensionElements = true;
+        break;
+      }
+      pNode = pNode.parentElement;
+    }
 
-    // Enregistrer les activités principales
-    if (['servicetask', 'usertask', 'scripttask', 'sendtask', 'receivetask', 'manualtask', 'businessruletask', 'subprocess', 'startevent', 'endevent', 'callactivity'].includes(localName)) {
+    // Enregistrer les activités principales (uniquement les nœuds BPMN réels hors extensionElements)
+    if (!isExtensionTag && !isInsideExtensionElements && ['servicetask', 'usertask', 'scripttask', 'sendtask', 'receivetask', 'manualtask', 'businessruletask', 'subprocess', 'startevent', 'endevent', 'callactivity'].includes(localName)) {
       activities.push({
         id: el.getAttribute('id') || ('act_' + rowId),
         name: el.getAttribute('name') || el.getAttribute('id') || localName,
@@ -2431,7 +2468,7 @@ function parseSingleBpmnDoc(xmlText, fileName) {
     }
 
     // Extraction spécifique des Call Activities et de leurs liaisons
-    if (localName === 'callactivity') {
+    if (!isExtensionTag && !isInsideExtensionElements && localName === 'callactivity') {
       const actId = el.getAttribute('id') || '';
       const actName = el.getAttribute('name') || actId;
       
@@ -2464,7 +2501,7 @@ function parseSingleBpmnDoc(xmlText, fileName) {
       // Zeebe <zeebe:ioMapping>
       const zeebeIo = el.querySelectorAll('input, zeebe\\:input, output, zeebe\\:output');
       zeebeIo.forEach(zio => {
-        const isInput = (zio.localName || '').toLowerCase() === 'input';
+        const isInput = (zio.localName || zio.tagName?.split(':').pop() || '').toLowerCase() === 'input';
         const src = zio.getAttribute('source') || '';
         const tgt = zio.getAttribute('target') || '';
         if (isInput) inMappings.push({ source: src, target: tgt });
@@ -2518,13 +2555,13 @@ function parseSingleBpmnDoc(xmlText, fileName) {
       }
     }
 
-    // Zeebe I/O Mappings
-    if (localName === 'input' || localName === 'output') {
-      const sourceAttr = el.getAttribute('source');
+    // Zeebe I/O Mappings & Camunda 7 In/Out
+    if (['input', 'output', 'in', 'out'].includes(localName)) {
+      const sourceAttr = el.getAttribute('source') || el.getAttribute('sourceExpression');
       const targetAttr = el.getAttribute('target');
       const parentProc = getParentProcessInfo(el);
       const taskObj = getTaskInfo(el);
-      const isInput = localName === 'input';
+      const isInput = localName === 'input' || localName === 'in';
 
       if (targetAttr) {
         variables.push({
@@ -2548,7 +2585,7 @@ function parseSingleBpmnDoc(xmlText, fileName) {
             processId,
             role: 'consumer',
             row: rowId++,
-            bpmnMeta: { node: el, attr: 'source', originalValue: sourceAttr, type: 'expression' }
+            bpmnMeta: { node: el, attr: el.hasAttribute('source') ? 'source' : 'sourceExpression', originalValue: sourceAttr, type: 'expression' }
           });
         });
       }
@@ -2790,16 +2827,84 @@ function correlateMultiBpmnBatch() {
     });
   });
 
-  // Analyser si les variables sont passées en Call Activity
+  // Analyser si les variables sont passées en Call Activity et auditer les contrats de données
   callRelations.forEach(rel => {
+    rel.contractViolations = [];
+    rel.contractWarnings = [];
+
+    const targetProc = procMap[rel.calledElement];
+    let targetContract = null;
+    if (targetProc && typeof BpmnZeebeParser !== 'undefined' && typeof BpmnZeebeParser.getProcessContract === 'function') {
+      targetContract = BpmnZeebeParser.getProcessContract(targetProc);
+    }
+
+    // Extraction robuste des variables FEEL pour chaque mapping
     (rel.inMappings || []).forEach(m => {
-      if (m.source && varGlobalStats.has(m.source)) varGlobalStats.get(m.source).inouts++;
-      if (m.target && varGlobalStats.has(m.target)) varGlobalStats.get(m.target).inouts++;
+      const srcVars = (typeof BpmnZeebeParser !== 'undefined' && typeof BpmnZeebeParser.extractFeelVariables === 'function')
+        ? BpmnZeebeParser.extractFeelVariables(m.source)
+        : (m.source ? [m.source] : []);
+
+      srcVars.forEach(s => {
+        if (s && varGlobalStats.has(s)) {
+          varGlobalStats.get(s).inouts++;
+          varGlobalStats.get(s).reads++;
+        }
+      });
+      if (m.target && varGlobalStats.has(m.target)) {
+        varGlobalStats.get(m.target).inouts++;
+      }
     });
+
     (rel.outMappings || []).forEach(m => {
-      if (m.source && varGlobalStats.has(m.source)) varGlobalStats.get(m.source).inouts++;
-      if (m.target && varGlobalStats.has(m.target)) varGlobalStats.get(m.target).inouts++;
+      const srcVars = (typeof BpmnZeebeParser !== 'undefined' && typeof BpmnZeebeParser.extractFeelVariables === 'function')
+        ? BpmnZeebeParser.extractFeelVariables(m.source)
+        : (m.source ? [m.source] : []);
+
+      srcVars.forEach(s => {
+        if (s && varGlobalStats.has(s)) {
+          varGlobalStats.get(s).inouts++;
+        }
+      });
+      if (m.target && varGlobalStats.has(m.target)) {
+        varGlobalStats.get(m.target).inouts++;
+        varGlobalStats.get(m.target).writes++;
+      }
     });
+
+    // Évaluation du Contrat de Données
+    if (targetContract) {
+      rel.targetRequiredInputs = targetContract.requiredInputs || [];
+      rel.targetProducedOutputs = targetContract.producedVariables || [];
+
+      // 1. Entrées obligatoires non fournies
+      const mappedTargets = new Set((rel.inMappings || []).map(m => m.target).filter(Boolean));
+      const missing = rel.targetRequiredInputs.filter(reqVar => !mappedTargets.has(reqVar));
+      if (missing.length > 0) {
+        rel.contractViolations.push(`Entrée(s) requise(s) manquante(s) : ${missing.join(', ')}`);
+      }
+
+      // 2. Sorties dont la source n'est pas produite par le sous-processus
+      const targetProducedSet = new Set(rel.targetProducedOutputs);
+      (rel.outMappings || []).forEach(m => {
+        if (!m.source) return;
+        const feelVars = (typeof BpmnZeebeParser !== 'undefined') ? BpmnZeebeParser.extractFeelVariables(m.source) : [];
+        feelVars.forEach(v => {
+          if (!targetProducedSet.has(v) && !['migration_loop', 'old_migration', 'migration'].includes(v)) {
+            rel.contractWarnings.push(`Sortie "${m.target}" : la source "${m.source}" n'est pas produite par le sous-processus`);
+          }
+        });
+      });
+    }
+
+    if (!rel.isResolved) {
+      rel.contractStatus = 'unresolved';
+    } else if (rel.contractViolations.length > 0) {
+      rel.contractStatus = 'violation';
+    } else if (rel.contractWarnings.length > 0) {
+      rel.contractStatus = 'warning';
+    } else {
+      rel.contractStatus = 'valid';
+    }
   });
 
   // Assigner les statuts de cycle de vie précis
@@ -2807,12 +2912,12 @@ function correlateMultiBpmnBatch() {
     b.variables.forEach(v => {
       const st = varGlobalStats.get(v.name);
       if (st) {
-        if (st.writes > 0 && st.reads === 0 && v.role !== 'property') {
+        if (st.writes > 0 && st.reads === 0 && v.role !== 'property' && v.role !== 'task_input') {
           v.role = 'dead'; // Variable Morte
-        } else if (st.writes === 0 && st.reads > 0 && v.role !== 'property') {
+        } else if (st.writes === 0 && st.reads > 0 && v.role !== 'property' && v.role !== 'task_input') {
           v.role = 'orphan'; // Variable Non Initialisée
-        } else if (st.inouts > 0) {
-          v.role = 'inout'; // Flux Inter-Processus
+        } else if (st.inouts > 0 || v.role === 'task_input') {
+          v.role = 'inout'; // Flux Inter-Processus / Entrée de tâche
         }
       }
     });
@@ -2928,7 +3033,7 @@ function updateBPMNPreview(){
 function getLifecycleBadgeClass(role) {
   if (role === 'producer') return 'badge-producer';
   if (role === 'consumer') return 'badge-consumer';
-  if (role === 'inout') return 'badge-inout';
+  if (role === 'inout' || role === 'task_input') return 'badge-inout';
   if (role === 'dead') return 'badge-dead';
   if (role === 'orphan') return 'badge-orphan';
   return 'badge-consumer';
@@ -2937,6 +3042,7 @@ function getLifecycleBadgeClass(role) {
 function getLifecycleLabel(role) {
   if (role === 'producer') return '🟢 Producteur (Write)';
   if (role === 'consumer') return '🔵 Consommateur (Read)';
+  if (role === 'task_input') return '📥 Paramètre Entrée';
   if (role === 'inout') return '🟣 Flux In/Out';
   if (role === 'dead') return '👻 Variable Morte';
   if (role === 'orphan') return '⚠️ Non Initialisée';
@@ -3077,9 +3183,18 @@ function renderProcMatrixView() {
       ? r.outMappings.map(m => `<span class="badge-lifecycle badge-producer">${esc(m.source || '')} ➔ ${esc(m.target || '')}</span>`).join(' ')
       : '<span style="color:var(--text-tertiary); font-size:11px;">Aucun mappage de sortie</span>';
 
-    const statusBadge = r.isResolved
-      ? '<span class="badge ok">✓ Fichier Lié</span>'
-      : '<span class="badge warn">⚠️ Non Fourni</span>';
+    let statusBadge = '';
+    if (!r.isResolved) {
+      statusBadge = '<span class="badge warn" title="Fichier sous-processus absent du lot">⚠️ Non Fourni</span>';
+    } else if (r.contractStatus === 'violation') {
+      const tip = esc(r.contractViolations.join(' | '));
+      statusBadge = `<span class="badge error" style="background:#fee2e2; color:#991b1b; border:1px solid #f87171;" title="${tip}">❌ Contrat Violé (${r.contractViolations.length})</span>`;
+    } else if (r.contractStatus === 'warning') {
+      const tip = esc(r.contractWarnings.join(' | '));
+      statusBadge = `<span class="badge warn" style="background:#fef3c7; color:#92400e; border:1px solid #f59e0b;" title="${tip}">⚠️ Sortie Non Produite</span>`;
+    } else {
+      statusBadge = '<span class="badge ok" style="background:#d1fae5; color:#065f46; border:1px solid #34d399;">✓ Contrat E/S Valide</span>';
+    }
 
     return `
       <tr>
@@ -4934,13 +5049,13 @@ window.handleLogout = function() {
 // ---------- Subprocesses Module Logic ----------
 
 window.switchModule = function(moduleName) {
+  if (moduleName === 'bpmn-naming') moduleName = 'bpmn-lint';
   currentModule = moduleName;
   document.body.classList.toggle('bpmn-lint-mobile', moduleName === 'bpmn-lint' && window.innerWidth <= 720);
   
   // Mettre à jour les boutons du sélecteur (en-têtes de catégorie)
   const btnVars = document.getElementById('btn-mod-variables');
   const btnSubs = document.getElementById('btn-mod-subprocesses');
-  const btnBpmn = document.getElementById('btn-mod-bpmn-naming');
   const btnBpmnLint = document.getElementById('btn-mod-bpmn-lint');
   const btnPmg = document.getElementById('btn-mod-pmg');
   const btnDiff = document.getElementById('btn-mod-diff');
@@ -4950,7 +5065,6 @@ window.switchModule = function(moduleName) {
 
   if (btnVars) btnVars.classList.toggle('active', moduleName === 'variables');
   if (btnSubs) btnSubs.classList.toggle('active', moduleName === 'subprocesses');
-  if (btnBpmn) btnBpmn.classList.toggle('active', moduleName === 'bpmn-naming');
   if (btnBpmnLint) btnBpmnLint.classList.toggle('active', moduleName === 'bpmn-lint');
   if (btnPmg) btnPmg.classList.toggle('active', moduleName === 'pmg');
   if (btnDiff) btnDiff.classList.toggle('active', moduleName === 'diff');
@@ -4963,7 +5077,6 @@ window.switchModule = function(moduleName) {
   // Mettre à jour l'expansion des groupes de menu
   const groupVars = document.getElementById('group-variables');
   const groupSubs = document.getElementById('group-subprocesses');
-  const groupBpmn = document.getElementById('group-bpmn-naming');
   const groupBpmnLint = document.getElementById('group-bpmn-lint');
   const groupPmg = document.getElementById('group-pmg');
   const groupDiff = document.getElementById('group-diff');
@@ -4973,7 +5086,6 @@ window.switchModule = function(moduleName) {
 
   if (groupVars) groupVars.classList.toggle('expanded', moduleName === 'variables');
   if (groupSubs) groupSubs.classList.toggle('expanded', moduleName === 'subprocesses');
-  if (groupBpmn) groupBpmn.classList.toggle('expanded', moduleName === 'bpmn-naming');
   if (groupBpmnLint) groupBpmnLint.classList.toggle('expanded', moduleName === 'bpmn-lint');
   if (groupPmg) groupPmg.classList.toggle('expanded', moduleName === 'pmg');
   if (groupDiff) groupDiff.classList.toggle('expanded', moduleName === 'diff');
@@ -4985,8 +5097,7 @@ window.switchModule = function(moduleName) {
   const varTabIds = ['import', 'config', 'procRelTab', 'resultsTab', 'dashTab', 'graphTab', 'rankTab', 'duplicatesTab', 'histTab'];
   // Onglets sous-processus
   const subTabIds = ['subImportTab', 'subAnalysisTab', 'subMapTab'];
-  // Onglets nommage BPMN
-  const bpmnTabIds = ['bpmnNamingImportTab', 'bpmnNamingConfigTab', 'bpmnNamingResultsTab'];
+  // Onglets Audit & Santé BPMN
   const bpmnLintTabIds = ['bpmnLintImportTab', 'bpmnLintRulesTab', 'bpmnLintResultsTab'];
   // Onglets PMG
   const pmgTabIds = ['pmgImportTab', 'pmgMatrixTab'];
@@ -5030,21 +5141,6 @@ window.switchModule = function(moduleName) {
     }
   });
 
-  bpmnTabIds.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      if (moduleName === 'bpmn-naming') {
-        if (id === 'bpmnNamingResultsTab') {
-          el.style.display = (window.bpmnNamingElements && window.bpmnNamingElements.length > 0) ? '' : 'none';
-        } else {
-          el.style.display = '';
-        }
-      } else {
-        el.style.display = 'none';
-      }
-    }
-  });
-
   bpmnLintTabIds.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -5067,15 +5163,11 @@ window.switchModule = function(moduleName) {
     }
   });
 
-  
   // Basculer sur l'onglet par défaut du module
   if (moduleName === 'variables') {
     switchTab('import');
   } else if (moduleName === 'subprocesses') {
     switchTab('sub-import');
-  } else if (moduleName === 'bpmn-naming') {
-    switchTab('bpmn-naming-import');
-    initBpmnNamingModule();
   } else if (moduleName === 'bpmn-lint') {
     switchTab('bpmn-lint-import');
     if (typeof initBpmnLintModule === 'function') initBpmnLintModule();
@@ -5084,7 +5176,6 @@ window.switchModule = function(moduleName) {
     if (typeof initPmgModule === 'function') {
       initPmgModule();
     }
-
   } else if (moduleName === 'diff') {
     switchTab('diff');
     if (typeof initDiffModule === 'function') {

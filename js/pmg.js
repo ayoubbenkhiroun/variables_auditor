@@ -49,6 +49,301 @@ window.pmgXmlDoc = null;
 window.pmgFileName = "";
 window.pmgActivities = [];
 window.pmgProcessDetails = {};
+window.pmgCurrentFileEntries = null;
+window.pmgBatchResult = null;
+window.pmgRootProcesses = [];
+window.pmgExplicitParents = null; // Set of procIds or null
+window.pmgParentFilter = 'all'; // 'all' | procId | 'shared_only'
+window.pmgActivityOrderMode = 'flow'; // 'flow' | 'diagram' | 'level' | 'xml'
+window.pmgSharedSubprocesses = [];
+
+// Activity Ordering Modes Definition
+window.PMG_ORDER_MODES = {
+  flow: {
+    id: 'flow',
+    label: '🌊 Flux BPMN (Flow)',
+    title: 'Parcours séquentiel DAG du flux BPMN depuis les débuts',
+    desc: 'Tri par flux d\'exécution séquentiel (StartEvent &rarr; SequenceFlow)'
+  },
+  diagram: {
+    id: 'diagram',
+    label: '📐 Visuel Diagramme (BPMNDI)',
+    title: 'Position géométrique réelle (coordonnées X, Y sur le diagramme BPMNDI)',
+    desc: 'Tri par disposition visuelle géométrique (de gauche à droite, puis haut en bas)'
+  },
+  level: {
+    id: 'level',
+    label: '📊 Hiérarchique (Niveau)',
+    title: 'Par niveau de profondeur hiérarchique (Parent > Macro SP > Tâche)',
+    desc: 'Tri par niveau hiérarchique de profondeur (Parents L1 &rarr; Macro L2 &rarr; Tâches L3)'
+  },
+  xml: {
+    id: 'xml',
+    label: '📄 Document XML',
+    title: 'Ordre brut d\'apparition dans le document XML source',
+    desc: 'Tri selon l\'ordre textuel séquentiel dans le fichier BPMN XML'
+  }
+};
+
+window.sortPmgActivities = function(acts, mode) {
+  const currentMode = mode || window.pmgActivityOrderMode || 'flow';
+  if (!acts || acts.length === 0) return [];
+  
+  const list = [...acts];
+
+  if (currentMode === 'flow') {
+    list.sort((a, b) => {
+      if (a.rootParentId && b.rootParentId && a.rootParentId !== b.rootParentId) {
+        return String(a.rootParentId).localeCompare(String(b.rootParentId));
+      }
+      const foA = a.flowOrder != null ? a.flowOrder : 9999;
+      const foB = b.flowOrder != null ? b.flowOrder : 9999;
+      if (foA !== foB) return foA - foB;
+      const lA = a.level || 1;
+      const lB = b.level || 1;
+      if (lA !== lB) return lA - lB;
+      return (a.xmlOrder || 0) - (b.xmlOrder || 0);
+    });
+  } else if (currentMode === 'diagram') {
+    list.sort((a, b) => {
+      const xA = a.diagramX != null ? a.diagramX : 9999;
+      const xB = b.diagramX != null ? b.diagramX : 9999;
+      const yA = a.diagramY != null ? a.diagramY : 9999;
+      const yB = b.diagramY != null ? b.diagramY : 9999;
+      if (Math.abs(xA - xB) > 25) return xA - xB;
+      return yA - yB;
+    });
+  } else if (currentMode === 'level') {
+    list.sort((a, b) => {
+      const lA = a.level || 1;
+      const lB = b.level || 1;
+      if (lA !== lB) return lA - lB;
+      const foA = a.flowOrder != null ? a.flowOrder : 9999;
+      const foB = b.flowOrder != null ? b.flowOrder : 9999;
+      if (foA !== foB) return foA - foB;
+      return (a.xmlOrder || 0) - (b.xmlOrder || 0);
+    });
+  } else if (currentMode === 'xml') {
+    list.sort((a, b) => (a.xmlOrder || 0) - (b.xmlOrder || 0));
+  }
+
+  list.forEach((act, idx) => {
+    act.orderIndex = idx + 1;
+  });
+
+  return list;
+};
+
+window.setPmgActivityOrderMode = function(mode) {
+  if (!window.PMG_ORDER_MODES[mode]) return;
+  window.pmgActivityOrderMode = mode;
+
+  document.querySelectorAll('.pmg-order-segmented-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  const activeBtn = document.getElementById('btnOrder' + mode.charAt(0).toUpperCase() + mode.slice(1));
+  if (activeBtn) activeBtn.classList.add('active');
+
+  const descEl = document.getElementById('pmgActiveOrderModeDesc');
+  if (descEl) {
+    descEl.innerHTML = window.PMG_ORDER_MODES[mode].desc;
+  }
+
+  if (window.pmgTempSubprocesses && window.pmgTempSubprocesses.length > 0) {
+    window.pmgTempSubprocesses = window.sortPmgActivities(window.pmgTempSubprocesses, mode);
+  }
+  if (window.pmgActivities && window.pmgActivities.length > 0) {
+    window.pmgActivities = window.sortPmgActivities(window.pmgActivities, mode);
+  }
+
+  if (window.renderPmgVisualTree) window.renderPmgVisualTree();
+  if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
+  if (window.renderPmgMatrix) window.renderPmgMatrix();
+};
+
+window.openPmgParentProcessModal = function() {
+  const modal = document.getElementById('modalPmgParentProcesses');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  window.renderPmgParentProcessModalContent();
+};
+
+window.closePmgParentProcessModal = function() {
+  const modal = document.getElementById('modalPmgParentProcesses');
+  if (modal) modal.style.display = 'none';
+};
+
+window.renderPmgParentProcessModalContent = function() {
+  const modalBody = document.getElementById('pmgParentProcessModalBody');
+  if (!modalBody) return;
+
+  const batch = window.pmgBatchResult;
+  if (!batch || !batch.processCatalog || batch.processCatalog.size === 0) {
+    modalBody.innerHTML = '<div style="padding:25px; text-align:center; color:var(--text-tertiary);">⚠️ Aucun processus BPMN chargé. Veuillez importer des fichiers BPMN à l\'étape 1.</div>';
+    return;
+  }
+
+  const roots = new Set((batch.rootProcesses || []).map(r => r.id));
+  const shared = batch.sharedSubprocesses || [];
+  const sharedMap = new Map(shared.map(s => [s.processId, s]));
+
+  let rowsHtml = '';
+  let parentIndex = 1;
+
+  for (const [procId, proc] of batch.processCatalog.entries()) {
+    const isRoot = roots.has(procId);
+    const sharedInfo = sharedMap.get(procId);
+    const actCount = proc.activities ? proc.activities.length : 0;
+    
+    let statusBadge = '';
+    if (isRoot) {
+      statusBadge = `<span style="background:rgba(99, 102, 241, 0.15); color:#6366f1; border:1px solid rgba(99, 102, 241, 0.3); padding:3px 10px; border-radius:12px; font-size:11px; font-weight:700;">🌟 Processus Parent (P${parentIndex++})</span>`;
+    } else if (sharedInfo) {
+      statusBadge = `<span class="pmg-shared-pill">🔗 Sous-processus Partagé (${sharedInfo.callerCount} appelants : ${escHtml(sharedInfo.sharedParentNames.join(', '))})</span>`;
+    } else {
+      const callerNames = (proc.callers || []).map(c => c.callerProcName || c.callerProcId).join(', ') || 'Call Activity';
+      statusBadge = `<span style="background:rgba(59, 130, 246, 0.12); color:var(--brand-primary); padding:3px 8px; border-radius:12px; font-size:11px; font-weight:600;">📁 Sous-processus dédié (Appelé par : ${escHtml(callerNames)})</span>`;
+    }
+
+    rowsHtml += `
+      <tr style="border-bottom:1px solid var(--border-color);">
+        <td style="padding:12px 10px; text-align:center;">
+          <input type="checkbox" class="pmg-parent-select-cb" data-proc-id="${escAttr(procId)}" ${isRoot ? 'checked' : ''} style="transform:scale(1.25); cursor:pointer;">
+        </td>
+        <td style="padding:12px 10px;">
+          <strong style="color:var(--text-primary); font-size:13px;">${escHtml(proc.name)}</strong>
+          <div style="font-size:11px; color:var(--text-tertiary); font-family:var(--font-mono); margin-top:2px;">ID: <code>${escHtml(procId)}</code></div>
+        </td>
+        <td style="padding:12px 10px; font-size:11.5px; color:var(--text-secondary);">
+          📄 ${escHtml(proc.fileName || 'diagramme.bpmn')}
+        </td>
+        <td style="padding:12px 10px; text-align:center;">
+          <span style="font-weight:700; color:var(--ok); font-size:12.5px; background:rgba(16, 185, 129, 0.1); padding:2px 8px; border-radius:10px;">${actCount}</span>
+        </td>
+        <td style="padding:12px 10px;">
+          ${statusBadge}
+        </td>
+      </tr>
+    `;
+  }
+
+  modalBody.innerHTML = `
+    <div style="margin-bottom:14px; background:rgba(0, 156, 215, 0.05); border:1px solid rgba(0, 156, 215, 0.2); border-radius:6px; padding:12px 16px; font-size:12px; color:var(--text-secondary); line-height:1.5;">
+      💡 <strong>Conseil d'Architecture BPMN &amp; Gouvernance :</strong> Cochez les processus qui constituent les <strong>Parents Principaux (P1, P2, P3...)</strong>. Leurs sous-processus et Call Activities seront automatiquement branchés. Les sous-processus appelés par plusieurs parents sont automatiquement détectés comme <strong>Sous-processus Partagés 🔗</strong>.
+    </div>
+
+    <div style="border:1px solid var(--border-color); border-radius:var(--border-radius-md); overflow-x:auto; background:var(--bg-card);">
+      <table style="width:100%; font-size:12px; border-collapse:collapse;">
+        <thead>
+          <tr style="background:var(--bg-card); border-bottom:1px solid var(--border-color); text-align:left;">
+            <th style="padding:10px; width:55px; text-align:center;">Parent ?</th>
+            <th style="padding:10px;">Nom &amp; ID du Processus</th>
+            <th style="padding:10px; width:170px;">Fichier source</th>
+            <th style="padding:10px; width:90px; text-align:center;">Activités</th>
+            <th style="padding:10px; width:260px;">Statut / Dépendances</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+
+window.applyPmgParentProcessSelection = function() {
+  const cbs = document.querySelectorAll('.pmg-parent-select-cb:checked');
+  const selectedIds = Array.from(cbs).map(cb => cb.getAttribute('data-proc-id')).filter(Boolean);
+
+  if (selectedIds.length === 0) {
+    alert("Veuillez sélectionner au moins un processus parent racine.");
+    return;
+  }
+
+  window.pmgExplicitParents = new Set(selectedIds);
+
+  if (window.pmgCurrentFileEntries) {
+    const batchResult = window.parseBpmnBatchForPmg(window.pmgCurrentFileEntries);
+    window.populatePmgAllStepsFromBpmnBatch(batchResult);
+  }
+
+  window.closePmgParentProcessModal();
+  alert(`✅ Configuration appliquée avec succès : ${selectedIds.length} processus parent(s) racine(s) configuré(s).`);
+};
+
+window.resetPmgParentDetectionToAuto = function() {
+  window.pmgExplicitParents = null;
+  if (window.pmgCurrentFileEntries) {
+    const batchResult = window.parseBpmnBatchForPmg(window.pmgCurrentFileEntries);
+    window.populatePmgAllStepsFromBpmnBatch(batchResult);
+  }
+  window.renderPmgParentProcessModalContent();
+};
+
+window.toggleAllPmgProcessesAsParents = function(selectAll) {
+  document.querySelectorAll('.pmg-parent-select-cb').forEach(cb => {
+    cb.checked = selectAll;
+  });
+};
+
+window.renderPmgParentFilterBar = function() {
+  const container = document.getElementById('pmgParentChipsList');
+  const badge = document.getElementById('pmgParentCountBadge');
+  if (!container) return;
+
+  const batch = window.pmgBatchResult;
+  if (!batch || !batch.rootProcesses || batch.rootProcesses.length === 0) {
+    container.innerHTML = '<span style="color: var(--text-tertiary); font-size: 11.5px;">Chargez des fichiers BPMN pour voir les filtres par processus parent...</span>';
+    if (badge) badge.textContent = 'En attente de BPMN';
+    return;
+  }
+
+  const roots = batch.rootProcesses;
+  const shared = batch.sharedSubprocesses || [];
+  const allActs = window.pmgTempSubprocesses || window.pmgActivities || [];
+  
+  if (badge) {
+    const pLabel = roots.map((r, i) => `P${i + 1}`).join(', ');
+    badge.textContent = `${roots.length} Parent${roots.length > 1 ? 's' : ''} (${pLabel}) • ${shared.length} partagé${shared.length > 1 ? 's' : ''}`;
+  }
+
+  const currentFilter = window.pmgParentFilter || 'all';
+
+  let html = `
+    <button class="pmg-filter-chip ${currentFilter === 'all' ? 'active' : ''}" onclick="setPmgParentFilter('all')">
+      🌐 Tous les Processus Parents (${allActs.length})
+    </button>
+  `;
+
+  roots.forEach((root, idx) => {
+    const rootActs = allActs.filter(a => a.rootParentId === root.id);
+    const isAct = currentFilter === root.id;
+    html += `
+      <button class="pmg-filter-chip ${isAct ? 'active' : ''}" onclick="setPmgParentFilter('${escAttr(root.id)}')">
+        🏛️ P${idx + 1}: ${escHtml(root.name)} (${rootActs.length})
+      </button>
+    `;
+  });
+
+  if (shared.length > 0) {
+    const sharedActs = allActs.filter(a => a.isSharedSubprocess);
+    const isAct = currentFilter === 'shared_only';
+    html += `
+      <button class="pmg-filter-chip ${isAct ? 'active' : ''}" style="${isAct ? '' : 'color:#db2777; border-color:rgba(236, 72, 153, 0.4);'}" onclick="setPmgParentFilter('shared_only')">
+        🔗 Sous-processus Partagés (${sharedActs.length})
+      </button>
+    `;
+  }
+
+  container.innerHTML = html;
+};
+
+window.setPmgParentFilter = function(filterVal) {
+  window.pmgParentFilter = filterVal;
+  window.renderPmgParentFilterBar();
+  if (window.renderPmgVisualTree) window.renderPmgVisualTree();
+  if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
+};
 
 // Custom CSV/Excel PMG Import state
 window.pmgImportMode = 'excel'; // Always 'excel' (BPMN direct removed)
@@ -1223,45 +1518,589 @@ window.onChangePmgStep2AssignMode = function() {
   }
 };
 
+
+// =========================================================================
+// PMG USER GROUP <-> POOL/LANE MAPPING & ENTITY INHERITANCE SYSTEM
+// =========================================================================
+
+window.pmgUserGroupMappings = {}; // Map of userGroupName -> { targetEntity: '...', isCustom: true }
+
+window.openPmgUserGroupMappingModal = function() {
+  const modal = document.getElementById('modalPmgUserGroupMapping');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  window.renderPmgUserGroupMappingContent();
+};
+
+window.closePmgUserGroupMappingModal = function() {
+  const modal = document.getElementById('modalPmgUserGroupMapping');
+  if (modal) modal.style.display = 'none';
+};
+
+window.renderPmgUserGroupMappingContent = function() {
+  const container = document.getElementById('pmgUserGroupMappingModalBody');
+  if (!container) return;
+
+  const activities = window.pmgTempSubprocesses || window.pmgActivities || [];
+  
+  // 1. Collect all distinct user groups from user tasks
+  const groupStats = new Map(); // groupName -> { count: N, associatedLanes: Set(), sampleActs: [] }
+  const allKnownLanes = new Set();
+
+  activities.forEach(act => {
+    if (act.entity && act.entity !== 'Non défini') {
+      allKnownLanes.add(act.entity);
+    }
+    const isUser = (act.type || '').toLowerCase().includes('user');
+    if (isUser && act.userGroup && act.userGroup.trim().length > 0) {
+      const gName = act.userGroup.trim();
+      if (!groupStats.has(gName)) {
+        groupStats.set(gName, { count: 0, associatedLanes: new Set(), sampleActs: [] });
+      }
+      const st = groupStats.get(gName);
+      st.count++;
+      if (act.entity && act.entity !== 'Non défini') st.associatedLanes.add(act.entity);
+      if (st.sampleActs.length < 3) st.sampleActs.push(act.name);
+    }
+  });
+
+  const lanesList = Array.from(allKnownLanes).sort();
+
+  if (groupStats.size === 0) {
+    container.innerHTML = '<div style="padding:25px; text-align:center; color:var(--text-tertiary); font-size:12.5px;">⚠️ Aucun groupe candidat (camunda:candidateGroups / zeebe:assignmentDefinition) n\'a été trouvé sur les User Tasks du lot BPMN.</div>';
+    return;
+  }
+
+  let rowsHtml = '';
+  let rowIdx = 0;
+
+  groupStats.forEach((st, gName) => {
+    const currentMapped = window.pmgUserGroupMappings[gName]?.targetEntity || Array.from(st.associatedLanes)[0] || '';
+    const lanesStr = Array.from(st.associatedLanes).join(', ') || '<span style="color:var(--text-tertiary); font-style:italic;">Aucune Lane</span>';
+
+    // Build Lane/Pool datalist options
+    let optionsHtml = '';
+    lanesList.forEach(l => {
+      optionsHtml += `<option value="${escAttr(l)}">${escHtml(l)}</option>`;
+    });
+
+    rowsHtml += `
+      <tr style="border-bottom: 1px solid var(--border-color);">
+        <td style="padding: 10px 8px; vertical-align: middle;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-size:14px;">👤</span>
+            <strong style="color:var(--text-primary); font-size:12.5px;">${escHtml(gName)}</strong>
+          </div>
+          <div style="font-size:10.5px; color:var(--text-tertiary); margin-top:2px;">Ex: ${escHtml(st.sampleActs.join(', '))}</div>
+        </td>
+        <td style="padding: 10px 8px; text-align: center; vertical-align: middle;">
+          <span style="font-size:11.5px; font-weight:700; background:rgba(0, 156, 215, 0.1); color:var(--brand-primary); padding:2px 8px; border-radius:10px;">
+            ${st.count} tâche(s)
+          </span>
+        </td>
+        <td style="padding: 10px 8px; font-size:11.5px; color:var(--text-secondary); vertical-align: middle;">
+          ${lanesStr}
+        </td>
+        <td style="padding: 8px 6px; vertical-align: middle;">
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input type="text" id="pmgMappedEntity_${rowIdx}" list="pmgKnownLanesList" value="${escAttr(currentMapped)}" placeholder="Saisir ou choisir une Lane / Entité..." style="flex:1; height:32px; font-size:12px; border-radius:var(--border-radius-md); border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-primary); padding:4px 8px;" onchange="savePmgSingleGroupMapping('${escAttr(gName)}', this.value)">
+          </div>
+        </td>
+      </tr>
+    `;
+    rowIdx++;
+  });
+
+  container.innerHTML = `
+    <datalist id="pmgKnownLanesList">
+      ${lanesList.map(l => `<option value="${escAttr(l)}">`).join('')}
+    </datalist>
+
+    <div style="margin-bottom:14px; background:rgba(99, 102, 241, 0.06); border:1px solid rgba(99, 102, 241, 0.25); border-radius:6px; padding:12px 16px; font-size:12px; color:var(--text-secondary); line-height:1.5;">
+      💡 <strong>Gestion des Groupes Transverses &amp; Rôles Déportés :</strong> Si un groupe d'utilisateurs (ex: <em>Auditeurs_Fraude</em>) intervient sur une Lane différente de son entité de rattachement (ex: <em>Pôle Conformité</em>), spécifiez ici son <strong>Entité Référente</strong>. Vous pourrez ensuite appliquer cette règle à toutes les tâches correspondantes en 1 clic.
+    </div>
+
+    <div style="border:1px solid var(--border-color); border-radius:var(--border-radius-md); overflow-x:auto; background:var(--bg-card);">
+      <table style="width:100%; font-size:12px; border-collapse:collapse;">
+        <thead>
+          <tr style="background:var(--bg-card); border-bottom:1px solid var(--border-color); text-align:left;">
+            <th style="padding:10px;">Groupe Utilisateur BPMN</th>
+            <th style="padding:10px; width:100px; text-align:center;">Occurrences</th>
+            <th style="padding:10px; width:220px;">Lanes BPMN actuelles</th>
+            <th style="padding:10px; width:280px;">Entité / Lane de Rattachement Cible</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+
+window.savePmgSingleGroupMapping = function(groupName, entityVal) {
+  if (!groupName) return;
+  window.pmgUserGroupMappings[groupName] = {
+    targetEntity: (entityVal || '').trim(),
+    isCustom: true
+  };
+};
+
+window.applyPmgUserGroupMappings = function() {
+  const activities = window.pmgTempSubprocesses || window.pmgActivities || [];
+  let updatedCount = 0;
+
+  activities.forEach((act, idx) => {
+    const isUser = (act.type || '').toLowerCase().includes('user');
+    if (isUser && act.userGroup && act.userGroup.trim().length > 0) {
+      const gName = act.userGroup.trim();
+      const mapping = window.pmgUserGroupMappings[gName];
+      if (mapping && mapping.targetEntity) {
+        act.entity = mapping.targetEntity;
+        const input = document.getElementById(`pmgEntityInput_${idx}`);
+        if (input) input.value = mapping.targetEntity;
+        updatedCount++;
+      }
+    }
+  });
+
+  if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
+  if (window.renderPmgStep3Kpis) window.renderPmgStep3Kpis();
+  window.closePmgUserGroupMappingModal();
+  alert(`🚀 Mappage appliqué avec succès : ${updatedCount} tâche(s) utilisateur(s) mise(s) à jour avec leurs entités cibles.`);
+};
+
+
+// =========================================================================
+// 🎯 PMG ADVANCED COLUMN FILTER ENGINE (Step 3, 4, 5 & Dynamic Sync)
+// =========================================================================
+
+window.pmgColFilters = {
+  step3: { act: '', type: 'all', entity: 'all', groupStatus: 'all', groupText: '', preset: null },
+  step4: { act: '', type: 'all', inStatus: 'all', inText: '', outStatus: 'all', outText: '', preset: null },
+  step5: { act: '', mode: 'all', case: '', comment: '', preset: null }
+};
+
+window.syncPmgStepActivityField = function(actId, field, val) {
+  const list = window.pmgTempSubprocesses || window.pmgActivities || [];
+  const act = list.find(a => a.id === actId);
+  if (act) {
+    if (field === 'inputs' || field === 'outputs') {
+      act[field] = typeof val === 'string' ? val.split(',').map(s => s.trim()).filter(Boolean) : (val || []);
+    } else {
+      act[field] = val;
+    }
+    if (field === 'entity') {
+      act.isInheritedEntity = false;
+    }
+  }
+};
+
+// Step 3 Filtering & Helpers
+window.onPmgStep3FilterChange = function() {
+  const actInput = document.getElementById('pmgFilterStep3Act');
+  const typeSelect = document.getElementById('pmgFilterStep3Type');
+  const entitySelect = document.getElementById('pmgFilterStep3Entity');
+  const groupStatusSelect = document.getElementById('pmgFilterStep3GroupStatus');
+  const groupTextInput = document.getElementById('pmgFilterStep3GroupText');
+
+  window.pmgColFilters.step3.act = (actInput?.value || '').trim().toLowerCase();
+  window.pmgColFilters.step3.type = typeSelect?.value || 'all';
+  window.pmgColFilters.step3.entity = entitySelect?.value || 'all';
+  window.pmgColFilters.step3.groupStatus = groupStatusSelect?.value || 'all';
+  window.pmgColFilters.step3.groupText = (groupTextInput?.value || '').trim().toLowerCase();
+
+  // Highlight active filters
+  if (actInput) actInput.classList.toggle('has-filter', Boolean(window.pmgColFilters.step3.act));
+  if (typeSelect) typeSelect.classList.toggle('has-filter', window.pmgColFilters.step3.type !== 'all');
+  if (entitySelect) entitySelect.classList.toggle('has-filter', window.pmgColFilters.step3.entity !== 'all');
+  if (groupStatusSelect) groupStatusSelect.classList.toggle('has-filter', window.pmgColFilters.step3.groupStatus !== 'all');
+  if (groupTextInput) groupTextInput.classList.toggle('has-filter', Boolean(window.pmgColFilters.step3.groupText));
+
+  window.renderPmgStep2ManualTable();
+};
+
+window.clearPmgStep3ColFilter = function(field) {
+  if (field === 'act') {
+    const el = document.getElementById('pmgFilterStep3Act');
+    if (el) el.value = '';
+  } else if (field === 'groupText') {
+    const el = document.getElementById('pmgFilterStep3GroupText');
+    if (el) el.value = '';
+  }
+  window.onPmgStep3FilterChange();
+};
+
+window.resetPmgStep3Filters = function() {
+  window.pmgColFilters.step3 = { act: '', type: 'all', entity: 'all', groupStatus: 'all', groupText: '', preset: null };
+  const actInput = document.getElementById('pmgFilterStep3Act');
+  const typeSelect = document.getElementById('pmgFilterStep3Type');
+  const entitySelect = document.getElementById('pmgFilterStep3Entity');
+  const groupStatusSelect = document.getElementById('pmgFilterStep3GroupStatus');
+  const groupTextInput = document.getElementById('pmgFilterStep3GroupText');
+
+  if (actInput) { actInput.value = ''; actInput.classList.remove('has-filter'); }
+  if (typeSelect) { typeSelect.value = 'all'; typeSelect.classList.remove('has-filter'); }
+  if (entitySelect) { entitySelect.value = 'all'; entitySelect.classList.remove('has-filter'); }
+  if (groupStatusSelect) { groupStatusSelect.value = 'all'; groupStatusSelect.classList.remove('has-filter'); }
+  if (groupTextInput) { groupTextInput.value = ''; groupTextInput.classList.remove('has-filter'); }
+
+  document.querySelectorAll('#pmgStep3FilterToolbar .pmg-filter-pill-btn').forEach(b => b.classList.remove('active'));
+
+  window.renderPmgStep2ManualTable();
+};
+
+window.togglePmgStep3Preset = function(presetKey) {
+  const current = window.pmgColFilters.step3.preset;
+  window.resetPmgStep3Filters();
+
+  if (current === presetKey) {
+    window.pmgColFilters.step3.preset = null;
+    return;
+  }
+
+  window.pmgColFilters.step3.preset = presetKey;
+  const chipBtn = document.getElementById('pmgChipStep3' + presetKey.charAt(0).toUpperCase() + presetKey.slice(1));
+  if (chipBtn) chipBtn.classList.add('active');
+
+  if (presetKey === 'userTasks') {
+    window.pmgColFilters.step3.type = 'usertask';
+    const typeSelect = document.getElementById('pmgFilterStep3Type');
+    if (typeSelect) { typeSelect.value = 'usertask'; typeSelect.classList.add('has-filter'); }
+  } else if (presetKey === 'noGroup') {
+    window.pmgColFilters.step3.groupStatus = 'no_group';
+    const groupStatusSelect = document.getElementById('pmgFilterStep3GroupStatus');
+    if (groupStatusSelect) { groupStatusSelect.value = 'no_group'; groupStatusSelect.classList.add('has-filter'); }
+  } else if (presetKey === 'transverse') {
+    window.pmgColFilters.step3.groupStatus = 'transverse';
+    const groupStatusSelect = document.getElementById('pmgFilterStep3GroupStatus');
+    if (groupStatusSelect) { groupStatusSelect.value = 'transverse'; groupStatusSelect.classList.add('has-filter'); }
+  } else if (presetKey === 'inherited') {
+    window.pmgColFilters.step3.entity = '__inherited__';
+    const entitySelect = document.getElementById('pmgFilterStep3Entity');
+    if (entitySelect) { entitySelect.value = '__inherited__'; entitySelect.classList.add('has-filter'); }
+  }
+
+  window.renderPmgStep2ManualTable();
+};
+
+// Step 4 Filtering & Helpers
+window.onPmgStep4FilterChange = function() {
+  const actInput = document.getElementById('pmgFilterStep4Act');
+  const typeSelect = document.getElementById('pmgFilterStep4Type');
+  const inStatusSelect = document.getElementById('pmgFilterStep4InStatus');
+  const inTextInput = document.getElementById('pmgFilterStep4InText');
+  const outStatusSelect = document.getElementById('pmgFilterStep4OutStatus');
+  const outTextInput = document.getElementById('pmgFilterStep4OutText');
+
+  window.pmgColFilters.step4.act = (actInput?.value || '').trim().toLowerCase();
+  window.pmgColFilters.step4.type = typeSelect?.value || 'all';
+  window.pmgColFilters.step4.inStatus = inStatusSelect?.value || 'all';
+  window.pmgColFilters.step4.inText = (inTextInput?.value || '').trim().toLowerCase();
+  window.pmgColFilters.step4.outStatus = outStatusSelect?.value || 'all';
+  window.pmgColFilters.step4.outText = (outTextInput?.value || '').trim().toLowerCase();
+
+  if (actInput) actInput.classList.toggle('has-filter', Boolean(window.pmgColFilters.step4.act));
+  if (typeSelect) typeSelect.classList.toggle('has-filter', window.pmgColFilters.step4.type !== 'all');
+  if (inStatusSelect) inStatusSelect.classList.toggle('has-filter', window.pmgColFilters.step4.inStatus !== 'all');
+  if (inTextInput) inTextInput.classList.toggle('has-filter', Boolean(window.pmgColFilters.step4.inText));
+  if (outStatusSelect) outStatusSelect.classList.toggle('has-filter', window.pmgColFilters.step4.outStatus !== 'all');
+  if (outTextInput) outTextInput.classList.toggle('has-filter', Boolean(window.pmgColFilters.step4.outText));
+
+  window.renderPmgStep3ManualTable();
+};
+
+window.clearPmgStep4ColFilter = function(field) {
+  if (field === 'act') {
+    const el = document.getElementById('pmgFilterStep4Act');
+    if (el) el.value = '';
+  } else if (field === 'inText') {
+    const el = document.getElementById('pmgFilterStep4InText');
+    if (el) el.value = '';
+  } else if (field === 'outText') {
+    const el = document.getElementById('pmgFilterStep4OutText');
+    if (el) el.value = '';
+  }
+  window.onPmgStep4FilterChange();
+};
+
+window.resetPmgStep4Filters = function() {
+  window.pmgColFilters.step4 = { act: '', type: 'all', inStatus: 'all', inText: '', outStatus: 'all', outText: '', preset: null };
+  const actInput = document.getElementById('pmgFilterStep4Act');
+  const typeSelect = document.getElementById('pmgFilterStep4Type');
+  const inStatusSelect = document.getElementById('pmgFilterStep4InStatus');
+  const inTextInput = document.getElementById('pmgFilterStep4InText');
+  const outStatusSelect = document.getElementById('pmgFilterStep4OutStatus');
+  const outTextInput = document.getElementById('pmgFilterStep4OutText');
+
+  if (actInput) { actInput.value = ''; actInput.classList.remove('has-filter'); }
+  if (typeSelect) { typeSelect.value = 'all'; typeSelect.classList.remove('has-filter'); }
+  if (inStatusSelect) { inStatusSelect.value = 'all'; inStatusSelect.classList.remove('has-filter'); }
+  if (inTextInput) { inTextInput.value = ''; inTextInput.classList.remove('has-filter'); }
+  if (outStatusSelect) { outStatusSelect.value = 'all'; outStatusSelect.classList.remove('has-filter'); }
+  if (outTextInput) { outTextInput.value = ''; outTextInput.classList.remove('has-filter'); }
+
+  document.querySelectorAll('#pmgStep4FilterToolbar .pmg-filter-pill-btn').forEach(b => b.classList.remove('active'));
+
+  window.renderPmgStep3ManualTable();
+};
+
+window.togglePmgStep4Preset = function(presetKey) {
+  const current = window.pmgColFilters.step4.preset;
+  window.resetPmgStep4Filters();
+
+  if (current === presetKey) {
+    window.pmgColFilters.step4.preset = null;
+    return;
+  }
+
+  window.pmgColFilters.step4.preset = presetKey;
+  const chipBtn = document.getElementById('pmgChipStep4' + presetKey.charAt(0).toUpperCase() + presetKey.slice(1));
+  if (chipBtn) chipBtn.classList.add('active');
+
+  if (presetKey === 'withInputs') {
+    window.pmgColFilters.step4.inStatus = 'has';
+    const s = document.getElementById('pmgFilterStep4InStatus');
+    if (s) { s.value = 'has'; s.classList.add('has-filter'); }
+  } else if (presetKey === 'withOutputs') {
+    window.pmgColFilters.step4.outStatus = 'has';
+    const s = document.getElementById('pmgFilterStep4OutStatus');
+    if (s) { s.value = 'has'; s.classList.add('has-filter'); }
+  } else if (presetKey === 'noVars') {
+    window.pmgColFilters.step4.inStatus = 'none';
+    window.pmgColFilters.step4.outStatus = 'none';
+    const s1 = document.getElementById('pmgFilterStep4InStatus');
+    const s2 = document.getElementById('pmgFilterStep4OutStatus');
+    if (s1) { s1.value = 'none'; s1.classList.add('has-filter'); }
+    if (s2) { s2.value = 'none'; s2.classList.add('has-filter'); }
+  }
+
+  window.renderPmgStep3ManualTable();
+};
+
+// Step 5 Filtering & Helpers
+window.onPmgStep5FilterChange = function() {
+  const actInput = document.getElementById('pmgFilterStep5Act');
+  const modeSelect = document.getElementById('pmgFilterStep5Mode');
+  const caseInput = document.getElementById('pmgFilterStep5Case');
+  const commentInput = document.getElementById('pmgFilterStep5Comment');
+
+  window.pmgColFilters.step5.act = (actInput?.value || '').trim().toLowerCase();
+  window.pmgColFilters.step5.mode = modeSelect?.value || 'all';
+  window.pmgColFilters.step5.case = (caseInput?.value || '').trim().toLowerCase();
+  window.pmgColFilters.step5.comment = (commentInput?.value || '').trim().toLowerCase();
+
+  if (actInput) actInput.classList.toggle('has-filter', Boolean(window.pmgColFilters.step5.act));
+  if (modeSelect) modeSelect.classList.toggle('has-filter', window.pmgColFilters.step5.mode !== 'all');
+  if (caseInput) caseInput.classList.toggle('has-filter', Boolean(window.pmgColFilters.step5.case));
+  if (commentInput) commentInput.classList.toggle('has-filter', Boolean(window.pmgColFilters.step5.comment));
+
+  window.renderPmgStep4ManualTable();
+};
+
+window.clearPmgStep5ColFilter = function(field) {
+  if (field === 'act') {
+    const el = document.getElementById('pmgFilterStep5Act');
+    if (el) el.value = '';
+  } else if (field === 'case') {
+    const el = document.getElementById('pmgFilterStep5Case');
+    if (el) el.value = '';
+  } else if (field === 'comment') {
+    const el = document.getElementById('pmgFilterStep5Comment');
+    if (el) el.value = '';
+  }
+  window.onPmgStep5FilterChange();
+};
+
+window.resetPmgStep5Filters = function() {
+  window.pmgColFilters.step5 = { act: '', mode: 'all', case: '', comment: '', preset: null };
+  const actInput = document.getElementById('pmgFilterStep5Act');
+  const modeSelect = document.getElementById('pmgFilterStep5Mode');
+  const caseInput = document.getElementById('pmgFilterStep5Case');
+  const commentInput = document.getElementById('pmgFilterStep5Comment');
+
+  if (actInput) { actInput.value = ''; actInput.classList.remove('has-filter'); }
+  if (modeSelect) { modeSelect.value = 'all'; modeSelect.classList.remove('has-filter'); }
+  if (caseInput) { caseInput.value = ''; caseInput.classList.remove('has-filter'); }
+  if (commentInput) { commentInput.value = ''; commentInput.classList.remove('has-filter'); }
+
+  document.querySelectorAll('#pmgStep5FilterToolbar .pmg-filter-pill-btn').forEach(b => b.classList.remove('active'));
+
+  window.renderPmgStep4ManualTable();
+};
+
+window.togglePmgStep5Preset = function(presetKey) {
+  const current = window.pmgColFilters.step5.preset;
+  window.resetPmgStep5Filters();
+
+  if (current === presetKey) {
+    window.pmgColFilters.step5.preset = null;
+    return;
+  }
+
+  window.pmgColFilters.step5.preset = presetKey;
+  const chipBtn = document.getElementById('pmgChipStep5' + (presetKey === 'Call Activity' ? 'Call' : presetKey === 'Automatique' ? 'Auto' : presetKey === 'Manuelle' ? 'Manual' : presetKey));
+  if (chipBtn) chipBtn.classList.add('active');
+
+  if (presetKey === 'noDoc') {
+    window.pmgColFilters.step5.comment = '__no_doc__';
+  } else {
+    window.pmgColFilters.step5.mode = presetKey;
+    const modeSelect = document.getElementById('pmgFilterStep5Mode');
+    if (modeSelect) { modeSelect.value = presetKey; modeSelect.classList.add('has-filter'); }
+  }
+
+  window.renderPmgStep4ManualTable();
+};
+
 window.renderPmgStep2ManualTable = function() {
   const tbody = document.getElementById('pmgStep2ManualTableBody');
   if (!tbody) return;
 
   const activities = window.pmgTempSubprocesses || [];
   if (activities.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" style="padding:15px; text-align:center; color:var(--text-tertiary);">Veuillez d\'abord valider l\'étape 1 pour charger les activités.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:15px; text-align:center; color:var(--text-tertiary);">Veuillez d\'abord charger des activités.</td></tr>';
+    return;
+  }
+
+  // Populate dynamic select options in filters if not already done or updated
+  const typeSelect = document.getElementById('pmgFilterStep3Type');
+  if (typeSelect) {
+    const currentVal = window.pmgColFilters.step3.type || 'all';
+    const typeMap = new Map();
+    activities.forEach(a => {
+      const k = window.getPmgTypeKey(a.type || a.typeLabel);
+      const l = a.typeLabel || a.type || 'Tâche';
+      typeMap.set(k, { label: l, count: (typeMap.get(k)?.count || 0) + 1 });
+    });
+    let typeOpts = '<option value="all">Tous les types (' + activities.length + ')</option>';
+    for (const [k, v] of typeMap.entries()) {
+      typeOpts += '<option value="' + escAttr(k) + '" ' + (k === currentVal ? 'selected' : '') + '>' + escHtml(v.label) + ' (' + v.count + ')</option>';
+    }
+    typeSelect.innerHTML = typeOpts;
+  }
+
+  const entitySelect = document.getElementById('pmgFilterStep3Entity');
+  if (entitySelect) {
+    const currentVal = window.pmgColFilters.step3.entity || 'all';
+    const entityMap = new Map();
+    activities.forEach(a => {
+      const e = (a.entity && a.entity !== 'Non défini') ? a.entity : 'Non défini';
+      entityMap.set(e, (entityMap.get(e) || 0) + 1);
+    });
+    let entOpts = '<option value="all">Toutes les entités (' + activities.length + ')</option>';
+    entOpts += '<option value="__inherited__" ' + ('__inherited__' === currentVal ? 'selected' : '') + '>↳ Hérités du Parent</option>';
+    for (const [e, count] of entityMap.entries()) {
+      entOpts += '<option value="' + escAttr(e) + '" ' + (e === currentVal ? 'selected' : '') + '>' + escHtml(e) + ' (' + count + ')</option>';
+    }
+    entitySelect.innerHTML = entOpts;
+  }
+
+  // Apply filters
+  const f = window.pmgColFilters.step3;
+  const filtered = activities.filter(act => {
+    // 1. Act text (name or id or parentProcessName)
+    if (f.act) {
+      const name = (act.name || '').toLowerCase();
+      const id = (act.id || '').toLowerCase();
+      const p = (act.parentProcessName || '').toLowerCase();
+      if (!name.includes(f.act) && !id.includes(f.act) && !p.includes(f.act)) return false;
+    }
+
+    // 2. Type filter
+    if (f.type !== 'all') {
+      const k = window.getPmgTypeKey(act.type || act.typeLabel);
+      if (k !== f.type) return false;
+    }
+
+    // 3. Entity filter
+    if (f.entity !== 'all') {
+      if (f.entity === '__inherited__') {
+        if (!act.isInheritedEntity) return false;
+      } else {
+        const ent = (act.entity && act.entity !== 'Non défini') ? act.entity : 'Non défini';
+        if (ent !== f.entity) return false;
+      }
+    }
+
+    // 4. Group Status & Group Text
+    const isUserTask = (act.type || '').toLowerCase().includes('user');
+    const groupVal = (act.userGroup || '').trim();
+    const hasGroup = groupVal.length > 0;
+    const mapping = hasGroup ? window.pmgUserGroupMappings[groupVal] : null;
+    const isTransverse = isUserTask && hasGroup && mapping && mapping.targetEntity && mapping.targetEntity !== (act.entity || '');
+
+    if (f.groupStatus !== 'all') {
+      if (f.groupStatus === 'with_group' && (!isUserTask || !hasGroup)) return false;
+      if (f.groupStatus === 'no_group' && (!isUserTask || hasGroup)) return false;
+      if (f.groupStatus === 'transverse' && !isTransverse) return false;
+      if (f.groupStatus === 'not_applicable' && isUserTask) return false;
+    }
+
+    if (f.groupText) {
+      if (!groupVal.toLowerCase().includes(f.groupText)) return false;
+    }
+
+    return true;
+  });
+
+  // Update count badge
+  const countBadge = document.getElementById('pmgStep3FilterCount');
+  if (countBadge) {
+    countBadge.innerHTML = '🎯 <strong>' + filtered.length + '</strong> / ' + activities.length + ' activités affichées';
+  }
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:25px; text-align:center; color:var(--text-tertiary); font-style:italic;">Aucune activité ne correspond aux filtres sélectionnés. <button class="btn-ghost" style="margin-left:8px; font-size:11px;" onclick="resetPmgStep3Filters()">Réinitialiser</button></td></tr>';
     return;
   }
 
   let html = '';
-  activities.forEach((act, idx) => {
+  filtered.forEach((act) => {
+    const origIdx = activities.indexOf(act);
     const isUserTask = (act.type || '').toLowerCase().includes('user');
     const entityVal = act.entity && act.entity !== 'Non défini' ? act.entity : '';
-    const groupVal = act.userGroup || '';
+    const groupVal = (typeof window.cleanPmgUserGroupName === 'function') ? window.cleanPmgUserGroupName(act.userGroup) : (act.userGroup || '');
     const hasGroup = groupVal.trim().length > 0;
+
+    // Check if group is mapped or transverse
+    let groupExtraBadge = '';
+    if (isUserTask && hasGroup) {
+      const mapping = window.pmgUserGroupMappings[groupVal.trim()];
+      if (mapping && mapping.targetEntity && mapping.targetEntity !== entityVal) {
+        groupExtraBadge = '<span style="background:rgba(245, 158, 11, 0.12); color:var(--warn); padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600; border:1px solid rgba(245, 158, 11, 0.25);" title="Le groupe ' + escAttr(groupVal) + ' est rattaché à l\'entité ' + escAttr(mapping.targetEntity) + '">⚠️ Transverse : Rattaché à ' + escHtml(mapping.targetEntity) + '</span>';
+      }
+    }
 
     let groupCellHtml = '';
     if (isUserTask) {
       if (hasGroup) {
         groupCellHtml = `
           <div style="display:flex; flex-direction:column; gap:4px;">
-            <input type="text" id="pmgGroupInput_${idx}" value="${escAttr(groupVal)}" placeholder="Ex: Validateurs_N1" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
-            <span class="pmg-badge-ok" style="font-size:10px; width:fit-content;">👤 Groupe candidat défini</span>
+            <input type="text" id="pmgGroupInput_${origIdx}" value="${escAttr(groupVal)}" placeholder="Ex: Validateurs_N1" oninput="syncPmgStepActivityField('${escAttr(act.id)}', 'userGroup', this.value)" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
+            <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
+              <span class="pmg-badge-ok" style="font-size:10px; width:fit-content;">👤 Groupe candidat défini</span>
+              ${groupExtraBadge}
+            </div>
           </div>
         `;
       } else {
         groupCellHtml = `
           <div style="display:flex; flex-direction:column; gap:4px;">
-            <input type="text" id="pmgGroupInput_${idx}" class="pmg-input-warn" value="" placeholder="⚠️ Saisir le groupe candidat (ex: Gestionnaires_RH)" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); padding: 4px 8px;">
+            <input type="text" id="pmgGroupInput_${origIdx}" class="pmg-input-warn" value="" placeholder="⚠️ Saisir le groupe candidat (ex: Gestionnaires_RH)" oninput="syncPmgStepActivityField('${escAttr(act.id)}', 'userGroup', this.value)" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); padding: 4px 8px;">
             <span class="pmg-badge-warn" style="font-size:10px; width:fit-content;">⚠️ Warning : User Task sans groupe candidat</span>
           </div>
         `;
       }
     } else {
       groupCellHtml = `
-        <input type="text" id="pmgGroupInput_${idx}" value="" placeholder="— Non applicable (${act.typeLabel || act.type})" readonly style="width: 100%; height: 32px; font-size: 11.5px; border-radius: var(--border-radius-md); border: 1px dashed var(--border-color); background: rgba(241, 245, 249, 0.6); color: #94a3b8; padding: 4px 8px; cursor:not-allowed;">
+        <input type="text" id="pmgGroupInput_${origIdx}" value="" placeholder="— Non applicable (${act.typeLabel || act.type})" readonly style="width: 100%; height: 32px; font-size: 11.5px; border-radius: var(--border-radius-md); border: 1px dashed var(--border-color); background: rgba(241, 245, 249, 0.6); color: #94a3b8; padding: 4px 8px; cursor:not-allowed;">
       `;
     }
+
+    const inheritedPill = act.isInheritedEntity 
+      ? '<span style="background:rgba(99, 102, 241, 0.1); color:#6366f1; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600; border:1px solid rgba(99, 102, 241, 0.25); margin-top:4px; display:inline-block;" title="Hérité de la Lane du processus parent">↳ Hérité du Parent</span>' 
+      : (entityVal ? '<span class="pmg-badge-info" style="font-size:10px; margin-top:4px; width:fit-content;">🏢 Lane / Pool BPMN</span>' : '<span style="font-size:10px; color:#94a3b8; margin-top:4px; display:block;">Optionnel</span>');
 
     html += `
       <tr style="border-bottom: 1px solid var(--border-color);">
@@ -1269,7 +2108,7 @@ window.renderPmgStep2ManualTable = function() {
           <span style="display:inline-block; margin-left:${(act.level - 1) * 14}px;">
             ${act.level > 1 ? '<span style="color:#009cd7;">└─ </span>' : ''}<strong>${escHtml(act.name)}</strong>
           </span>
-          <div style="font-size:10.5px; color:#94a3b8; margin-left:${(act.level - 1) * 14}px;">id: <code>${escHtml(act.id)}</code></div>
+          <div style="font-size:10.5px; color:#94a3b8; margin-left:${(act.level - 1) * 14}px;">id: <code>${escHtml(act.id)}</code> • <em>${escHtml(act.parentProcessName || '')}</em></div>
         </td>
         <td style="padding: 10px 8px; vertical-align: top;">
           <span style="font-size: 11px; padding: 3px 8px; border-radius: 6px; font-weight:700; ${isUserTask ? 'background: rgba(234, 91, 12, 0.1); color: #ea5b0c; border: 1px solid rgba(234, 91, 12, 0.25);' : 'background: rgba(0, 156, 215, 0.1); color: #009cd7; border: 1px solid rgba(0, 156, 215, 0.25);'}">
@@ -1277,8 +2116,8 @@ window.renderPmgStep2ManualTable = function() {
           </span>
         </td>
         <td style="padding: 8px 6px; vertical-align: top;">
-          <input type="text" id="pmgEntityInput_${idx}" value="${escAttr(entityVal)}" placeholder="Ex: Direction Réseau / Lane" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
-          ${entityVal ? `<span class="pmg-badge-info" style="font-size:10px; margin-top:4px; width:fit-content;">🏢 Entité / Lane liée</span>` : `<span style="font-size:10px; color:#94a3b8; margin-top:4px; display:block;">Optionnel (à compléter)</span>`}
+          <input type="text" id="pmgEntityInput_${origIdx}" value="${escAttr(entityVal)}" placeholder="Ex: CDD ou Direction Réseau" oninput="syncPmgStepActivityField('${escAttr(act.id)}', 'entity', this.value)" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
+          ${inheritedPill}
         </td>
         <td style="padding: 8px 6px; vertical-align: top;">
           ${groupCellHtml}
@@ -1301,77 +2140,387 @@ window.applyDefaultEntityToAllPmg = function() {
   });
 };
 
+// =========================================================================
+// PMG COMPONENT TYPE FILTER SYSTEM (Display & Export)
+// =========================================================================
+
+window.pmgTypeFilters = window.pmgTypeFilters || {};
+
+const PMG_TYPE_META = {
+  'usertask': { label: 'User Task', icon: '👤', color: '#10b981', category: 'human' },
+  'callactivity': { label: 'Call Activity', icon: '📁', color: '#3b82f6', category: 'sub' },
+  'subprocess': { label: 'Sous-processus', icon: '📁', color: '#06b6d4', category: 'sub' },
+  'scripttask': { label: 'Script Task', icon: '📜', color: '#f59e0b', category: 'auto' },
+  'servicetask': { label: 'Service Task', icon: '⚙️', color: '#8b5cf6', category: 'auto' },
+  'manualtask': { label: 'Manual Task', icon: '🛠️', color: '#ec4899', category: 'human' },
+  'businessruletask': { label: 'Business Rule Task', icon: '📋', color: '#6366f1', category: 'auto' },
+  'sendtask': { label: 'Send Task', icon: '📤', color: '#14b8a6', category: 'auto' },
+  'receivetask': { label: 'Receive Task', icon: '📥', color: '#0ea5e9', category: 'auto' },
+  'task': { label: 'Task (Générique)', icon: '📄', color: '#64748b', category: 'other' }
+};
+
+window.getPmgTypeKey = function(rawType) {
+  if (!rawType) return 'task';
+  const t = String(rawType).toLowerCase().replace(/[^a-z]/g, '');
+  if (t.includes('user')) return 'usertask';
+  if (t.includes('call')) return 'callactivity';
+  if (t.includes('sous') || t.includes('sub')) return 'subprocess';
+  if (t.includes('script')) return 'scripttask';
+  if (t.includes('service')) return 'servicetask';
+  if (t.includes('manual') || t.includes('manuelle')) return 'manualtask';
+  if (t.includes('business') || t.includes('rule') || t.includes('dmn')) return 'businessruletask';
+  if (t.includes('send')) return 'sendtask';
+  if (t.includes('receive')) return 'receivetask';
+  return 'task';
+};
+
+window.isPmgTypeVisible = function(rawType) {
+  if (!window.pmgTypeFilters) return true;
+  const key = window.getPmgTypeKey(rawType);
+  return window.pmgTypeFilters[key] !== false;
+};
+
+window.getPmgFilteredActivities = function() {
+  const all = window.pmgActivities || window.pmgTempSubprocesses || [];
+  if (!window.pmgTypeFilters) return all;
+  return all.filter(act => window.isPmgTypeVisible(act.type || act.typeLabel));
+};
+
+window.renderPmgTypeFilterBar = function() {
+  const listContainer = document.getElementById('pmgTypeCheckboxesList');
+  const summaryBadge = document.getElementById('pmgTypeFilterSummaryBadge');
+  if (!listContainer) return;
+
+  const acts = window.pmgTempSubprocesses || window.pmgActivities || [];
+  if (acts.length === 0) {
+    listContainer.innerHTML = '<span style="color:var(--text-tertiary); font-size:11.5px;">Chargez un BPMN pour afficher les filtres par type...</span>';
+    if (summaryBadge) summaryBadge.textContent = 'En attente de BPMN';
+    return;
+  }
+
+  // Count items by type
+  const counts = {};
+  acts.forEach(act => {
+    const key = window.getPmgTypeKey(act.type || act.typeLabel);
+    counts[key] = (counts[key] || 0) + 1;
+    if (window.pmgTypeFilters[key] === undefined) {
+      window.pmgTypeFilters[key] = true;
+    }
+  });
+
+  // Calculate totals
+  const allKeys = Object.keys(counts);
+  let visibleCount = 0;
+  acts.forEach(act => {
+    if (window.isPmgTypeVisible(act.type || act.typeLabel)) visibleCount++;
+  });
+
+  if (summaryBadge) {
+    if (visibleCount === acts.length) {
+      summaryBadge.textContent = `Tous les types actifs (${acts.length} act.)`;
+      summaryBadge.style.background = 'rgba(16, 185, 129, 0.12)';
+      summaryBadge.style.color = 'var(--ok)';
+      summaryBadge.style.borderColor = 'rgba(16, 185, 129, 0.25)';
+    } else {
+      summaryBadge.textContent = `${visibleCount} / ${acts.length} act. actives`;
+      summaryBadge.style.background = 'rgba(245, 158, 11, 0.12)';
+      summaryBadge.style.color = 'var(--warn)';
+      summaryBadge.style.borderColor = 'rgba(245, 158, 11, 0.25)';
+    }
+  }
+
+  // Render chips
+  let chipsHtml = '';
+  allKeys.forEach(typeKey => {
+    const meta = PMG_TYPE_META[typeKey] || { label: typeKey, icon: '📄', color: '#64748b' };
+    const count = counts[typeKey] || 0;
+    const isChecked = window.pmgTypeFilters[typeKey] !== false;
+    const chipBg = isChecked ? 'var(--bg-card)' : 'rgba(148, 163, 184, 0.08)';
+    const chipBorder = isChecked ? meta.color : 'var(--border-color)';
+    const chipOpacity = isChecked ? '1' : '0.6';
+
+    chipsHtml += `
+      <label class="pmg-type-chip-item" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:8px; background:${chipBg}; border:1px solid ${chipBorder}; font-size:11.5px; font-weight:600; cursor:pointer; user-select:none; opacity:${chipOpacity}; transition:all 0.15s ease;">
+        <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="togglePmgTypeFilter('${typeKey}', this.checked)" style="cursor:pointer; accent-color:${meta.color};">
+        <span>${meta.icon} ${meta.label}</span>
+        <span style="font-size:10px; padding:1px 6px; border-radius:10px; background:${meta.color}22; color:${meta.color}; border:1px solid ${meta.color}44; font-weight:700;">${count}</span>
+      </label>
+    `;
+  });
+
+  listContainer.innerHTML = chipsHtml;
+};
+
+window.togglePmgTypeFilter = function(typeKey, isChecked) {
+  window.pmgTypeFilters[typeKey] = isChecked;
+  window.renderPmgTypeFilterBar();
+  window.renderPmgVisualTree();
+  window.renderPmgStep2Kpis();
+  if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
+  if (window.renderPmgStep3ManualTable) window.renderPmgStep3ManualTable();
+  if (window.renderPmgStep4ManualTable) window.renderPmgStep4ManualTable();
+  if (window.savePmgStateToLocalStorage) window.savePmgStateToLocalStorage();
+};
+
+window.selectAllPmgTypeFilters = function(selectAll) {
+  const acts = window.pmgTempSubprocesses || window.pmgActivities || [];
+  acts.forEach(act => {
+    const key = window.getPmgTypeKey(act.type || act.typeLabel);
+    window.pmgTypeFilters[key] = selectAll;
+  });
+  window.renderPmgTypeFilterBar();
+  window.renderPmgVisualTree();
+  window.renderPmgStep2Kpis();
+  if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
+  if (window.renderPmgStep3ManualTable) window.renderPmgStep3ManualTable();
+  if (window.renderPmgStep4ManualTable) window.renderPmgStep4ManualTable();
+  if (window.savePmgStateToLocalStorage) window.savePmgStateToLocalStorage();
+};
+
+window.selectPmgPreset = function(preset) {
+  const acts = window.pmgTempSubprocesses || window.pmgActivities || [];
+  acts.forEach(act => {
+    const key = window.getPmgTypeKey(act.type || act.typeLabel);
+    const meta = PMG_TYPE_META[key] || {};
+    if (preset === 'humans') {
+      window.pmgTypeFilters[key] = (meta.category === 'human' || meta.category === 'sub');
+    } else if (preset === 'automations') {
+      window.pmgTypeFilters[key] = (meta.category === 'auto' || meta.category === 'sub');
+    }
+  });
+  window.renderPmgTypeFilterBar();
+  window.renderPmgVisualTree();
+  window.renderPmgStep2Kpis();
+  if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
+  if (window.renderPmgStep3ManualTable) window.renderPmgStep3ManualTable();
+  if (window.renderPmgStep4ManualTable) window.renderPmgStep4ManualTable();
+  if (window.savePmgStateToLocalStorage) window.savePmgStateToLocalStorage();
+};
+
 // Visual Tree View Component Logic
 window.renderPmgVisualTree = function(activities) {
   const container = document.getElementById('pmgVisualTreeContainer');
   const treeBox = document.getElementById('pmgVisualTreeBox');
   if (!container || !treeBox) return;
 
-  if (!activities || activities.length === 0) {
+  let allActs = activities || window.pmgTempSubprocesses || window.pmgActivities || [];
+  if (!allActs || allActs.length === 0) {
     container.style.display = 'none';
     return;
   }
 
   container.style.display = 'block';
 
-  // Build node lookup map
-  const nodeMap = new Map();
-  activities.forEach(act => {
-    nodeMap.set(act.name.toLowerCase(), { ...act, children: [] });
-    nodeMap.set(act.id.toLowerCase(), nodeMap.get(act.name.toLowerCase()));
-  });
+  // Render filter bars
+  if (window.renderPmgTypeFilterBar) window.renderPmgTypeFilterBar();
+  if (window.renderPmgParentFilterBar) window.renderPmgParentFilterBar();
 
-  const roots = [];
-  activities.forEach(act => {
-    const node = nodeMap.get(act.name.toLowerCase());
-    if (act.parentId) {
-      const parentNode = nodeMap.get(act.parentId.toLowerCase());
-      if (parentNode && parentNode !== node) {
-        parentNode.children.push(node);
-      } else {
-        roots.push(node);
-      }
-    } else {
-      roots.push(node);
-    }
-  });
+  // Sort activities based on active order mode
+  allActs = window.sortPmgActivities(allActs, window.pmgActivityOrderMode);
+
+  // Filter according to parent process selection
+  const parentFilter = window.pmgParentFilter || 'all';
+  let filteredByParentActs = allActs;
+  if (parentFilter === 'shared_only') {
+    filteredByParentActs = allActs.filter(a => a.isSharedSubprocess);
+  } else if (parentFilter !== 'all') {
+    filteredByParentActs = allActs.filter(a => a.rootParentId === parentFilter || a.parentProcessId === parentFilter);
+  }
+
+  const batch = window.pmgBatchResult;
+  const rootProcesses = (batch && batch.rootProcesses && batch.rootProcesses.length > 0)
+    ? batch.rootProcesses
+    : (window.pmgRootProcesses || []);
 
   const levelColors = [
     '#3b82f6', '#06b6d4', '#f59e0b', '#8b5cf6',
     '#ec4899', '#ef4444', '#10b981', '#6366f1'
   ];
 
-  const buildTreeHTML = (nodes) => {
+  // Helper function to build a sub-tree of nodes
+  function buildTreeHTML(nodes) {
+    const filteredNodes = nodes.filter(hasVisibleDescendant);
+    if (filteredNodes.length === 0) return '';
+
     let html = '<ul class="pmg-tree-ul" style="list-style:none; padding-left:16px; margin:0;">';
-    nodes.forEach(node => {
-      const hasChildren = node.children && node.children.length > 0;
-      const isSub = node.type.toLowerCase().includes('sous-processus') || node.type.toLowerCase().includes('call');
-      const lvlColor = levelColors[(node.level - 1) % levelColors.length];
-      const icon = isSub ? '📁' : '📄';
-      const safeId = node.id || node.name || '';
+    filteredNodes.forEach(node => {
+      const visibleChildren = (node.children || []).filter(hasVisibleDescendant);
+      const hasChildren = visibleChildren.length > 0;
+      const isCallAct = (node.type || '').toLowerCase().includes('call');
+      const isSub = (node.type || '').toLowerCase().includes('sous-processus') || isCallAct;
+      const lvlColor = levelColors[((node.level || 1) - 1) % levelColors.length];
+      
+      const typeKey = window.getPmgTypeKey(node.type || node.typeLabel);
+      const meta = PMG_TYPE_META[typeKey] || { icon: '📄', color: '#64748b' };
+      const icon = isSub ? '📁' : meta.icon;
+      const safeId = node.uniqueId || node.id || node.name || '';
+
+      const nodeOpacity = node.isVisible ? '1' : '0.55';
+      const nodeBorder = node.isVisible ? 'var(--border-color)' : '1px dashed rgba(148, 163, 184, 0.45)';
+
+      // Call Activity calledElement badge
+      let calledElementBadge = '';
+      if (isCallAct && node.calledElement) {
+        if (node.targetMissing) {
+          calledElementBadge = `<span style="background:rgba(239, 68, 68, 0.12); color:#ef4444; padding:2px 6px; border-radius:4px; font-size:10px; font-family:var(--font-mono); border:1px solid rgba(239, 68, 68, 0.3);" title="Sous-processus introuvable dans le lot importé">⚠️ Cible: ${escHtml(node.calledElement)} (Non trouvé)</span>`;
+        } else {
+          calledElementBadge = `<span style="background:rgba(59, 130, 246, 0.12); color:var(--brand-primary); padding:2px 6px; border-radius:4px; font-size:10px; font-family:var(--font-mono); border:1px solid rgba(59, 130, 246, 0.25);" title="Process ID appelé (calledElement)">🎯 Appelle: ${escHtml(node.calledElement)}</span>`;
+        }
+      }
+
+      // Explicit Parent Process Name Badge
+      const parentName = node.parentProcessName || node.rootParentName || 'Processus Racine';
+      const parentBadge = `<span class="pmg-parent-badge" title="Nom du Processus Parent Référent">🏛️ Parent : ${escHtml(parentName)}</span>`;
+
+      // Shared Subprocess Indicator Badge
+      let sharedBadge = '';
+      if (node.isSharedSubprocess) {
+        const sharedParents = node.sharedParentNames && node.sharedParentNames.length > 0 ? node.sharedParentNames.join(', ') : 'Multi-parents';
+        sharedBadge = `<span class="pmg-shared-pill" title="Sous-processus transversal partagé par : ${escHtml(sharedParents)}">🔗 Partagé (${(node.sharedParentNames || []).length} parents : ${escHtml(sharedParents)})</span>`;
+      }
+
+      // Order Index Pill
+      const orderPill = `<span class="pmg-order-pill" title="Position d\'ordonnancement ${window.pmgActivityOrderMode} : #${node.orderIndex || 1}">#${node.orderIndex || 1}</span>`;
 
       html += `
-        <li class="pmg-tree-node" data-name="${escAttr((node.name || '').toLowerCase())}" style="margin:6px 0;">
-          <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:6px 10px; border-radius:6px; border:1px solid var(--border-color);">
+        <li class="pmg-tree-node" data-name="${escAttr((node.name || '').toLowerCase())}" data-id="${escAttr(safeId)}" data-type="${escAttr(typeKey)}" style="margin:6px 0; opacity:${nodeOpacity};">
+          <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:6px 10px; border-radius:6px; border:1px solid ${nodeBorder}; flex-wrap:wrap;">
             ${hasChildren ? `<button class="tree-toggle-btn" onclick="togglePmgTreeNode(this)" style="background:none; border:none; color:var(--text-primary); cursor:pointer; font-weight:bold; font-size:12px; padding:0 4px;">▼</button>` : `<span style="width:14px; display:inline-block;"></span>`}
+            ${orderPill}
             <span style="font-size:14px;">${icon}</span>
-            <span style="font-weight:600; color:var(--text-primary); font-size:12px;">${escHtml(node.name)}</span>
-            <span style="background:${isSub ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)'}; color:${isSub ? 'var(--brand-primary)' : 'var(--ok)'}; padding:2px 6px; border-radius:10px; font-size:10px; font-weight:600;">${escHtml(node.type)}</span>
-            <span style="background:rgba(255,255,255,0.05); color:${lvlColor}; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600; border:1px solid ${lvlColor}44; margin-left:auto;">Niveau ${node.level}</span>
+            <strong style="color:var(--text-primary); font-size:12px;">${escHtml(node.name)}</strong>
+            <span style="background:${isSub ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)'}; color:${isSub ? 'var(--brand-primary)' : 'var(--ok)'}; padding:2px 6px; border-radius:10px; font-size:10px; font-weight:600;">${escHtml(node.typeLabel || node.type)}</span>
+            ${parentBadge}
+            ${sharedBadge}
+            ${calledElementBadge}
+            <span style="background:rgba(255,255,255,0.05); color:${lvlColor}; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600; border:1px solid ${lvlColor}44; margin-left:auto;">Niveau ${node.level || 1}</span>
             
             <!-- Quick Action Buttons -->
             <button class="btn-ghost" style="padding:2px 6px; font-size:10px; height:24px; color:var(--brand-primary); border:1px solid var(--border-color);" data-act-id="${escAttr(safeId)}" onclick="openPmgEditTreeNodeModalFromEl(this)" title="Éditer / Réorganiser">✏️ Éditer</button>
             <button class="btn-ghost" style="padding:2px 6px; font-size:10px; height:24px; color:var(--ok); border:1px solid var(--border-color);" data-act-id="${escAttr(safeId)}" onclick="addNewPmgSubactivityFromEl(this)" title="Ajouter une sous-activité enfant">➕ Enfant</button>
           </div>
-          ${hasChildren ? buildTreeHTML(node.children) : ''}
+          ${hasChildren ? buildTreeHTML(visibleChildren) : ''}
         </li>
       `;
     });
     html += '</ul>';
     return html;
-  };
+  }
 
-  treeBox.innerHTML = buildTreeHTML(roots);
+  function hasVisibleDescendant(node) {
+    if (node.isVisible) return true;
+    if (node.children && node.children.length > 0) {
+      return node.children.some(hasVisibleDescendant);
+    }
+    return false;
+  }
+
+  // Determine effective roots to group by
+  let targetRoots = rootProcesses;
+  if (parentFilter !== 'all' && parentFilter !== 'shared_only') {
+    targetRoots = rootProcesses.filter(r => r.id === parentFilter);
+  }
+
+  // If no root processes metadata exists, render flat tree
+  if (!targetRoots || targetRoots.length === 0 || parentFilter === 'shared_only') {
+    const nodeMap = new Map();
+    filteredByParentActs.forEach(act => {
+      const isVisible = window.isPmgTypeVisible ? window.isPmgTypeVisible(act.type || act.typeLabel) : true;
+      const key = act.uniqueId || act.id || act.name;
+      nodeMap.set(key, { ...act, isVisible, children: [] });
+    });
+
+    const roots = [];
+    filteredByParentActs.forEach(act => {
+      const key = act.uniqueId || act.id || act.name;
+      const node = nodeMap.get(key);
+      if (!node) return;
+      if (act.parentId && nodeMap.has(act.parentId) && nodeMap.get(act.parentId) !== node) {
+        nodeMap.get(act.parentId).children.push(node);
+      } else {
+        roots.push(node);
+      }
+    });
+
+    const finalHtml = buildTreeHTML(roots);
+    treeBox.innerHTML = finalHtml || '<div style="padding:25px; text-align:center; color:var(--text-tertiary); font-size:12px;">⚠️ Aucun composant ne correspond aux filtres sélectionnés.</div>';
+    return;
+  }
+
+  // Render Structured Multi-Parent Sections
+  let multiParentHtml = '';
+
+  targetRoots.forEach((rootProc, rIdx) => {
+    const parentActs = filteredByParentActs.filter(a => a.rootParentId === rootProc.id);
+    if (parentActs.length === 0) return;
+
+    // Build node map for this root parent branch
+    const nodeMap = new Map();
+    parentActs.forEach(act => {
+      const isVisible = window.isPmgTypeVisible ? window.isPmgTypeVisible(act.type || act.typeLabel) : true;
+      const key = act.uniqueId || act.id || act.name;
+      nodeMap.set(key, { ...act, isVisible, children: [] });
+    });
+
+    const branchRoots = [];
+    parentActs.forEach(act => {
+      const key = act.uniqueId || act.id || act.name;
+      const node = nodeMap.get(key);
+      if (!node) return;
+
+      if (act.parentId) {
+        let parentNode = nodeMap.get(act.parentId);
+        if (!parentNode) {
+          for (const [k, n] of nodeMap.entries()) {
+            if (n.uniqueId === act.parentId || n.id === act.parentId || (n.name && n.name.toLowerCase() === act.parentId.toLowerCase())) {
+              parentNode = n;
+              break;
+            }
+          }
+        }
+        if (parentNode && parentNode !== node) {
+          if (!parentNode.children.includes(node)) {
+            parentNode.children.push(node);
+          }
+        } else {
+          if (!branchRoots.includes(node)) branchRoots.push(node);
+        }
+      } else {
+        if (!branchRoots.includes(node)) branchRoots.push(node);
+      }
+    });
+
+    const branchHtml = buildTreeHTML(branchRoots);
+    if (!branchHtml) return;
+
+    multiParentHtml += `
+      <div class="pmg-tree-parent-card" style="margin-bottom:14px; border:1px solid rgba(99, 102, 241, 0.3); border-radius:8px; overflow:hidden; background:var(--bg-card); box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+        <div style="background:linear-gradient(90deg, rgba(99, 102, 241, 0.12), rgba(0, 156, 215, 0.08)); padding:10px 14px; border-bottom:1px solid rgba(99, 102, 241, 0.2); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:17px;">🏛️</span>
+            <div>
+              <strong style="color:var(--text-primary); font-size:13px;">Processus Parent P${rIdx + 1} : ${escHtml(rootProc.name)}</strong>
+              <div style="font-size:11px; color:var(--text-tertiary); font-family:var(--font-mono); margin-top:1px;">Process ID: <code>${escHtml(rootProc.id)}</code> • Fichier: <em>${escHtml(rootProc.fileName || 'source.bpmn')}</em></div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:11px; padding:3px 10px; border-radius:12px; background:rgba(99, 102, 241, 0.2); color:#6366f1; font-weight:700; border:1px solid rgba(99, 102, 241, 0.35);">
+              ${parentActs.length} activité(s)
+            </span>
+          </div>
+        </div>
+        <div style="padding:10px 12px 14px 12px;">
+          ${branchHtml}
+        </div>
+      </div>
+    `;
+  });
+
+  if (!multiParentHtml) {
+    treeBox.innerHTML = '<div style="padding:25px; text-align:center; color:var(--text-tertiary); font-size:12px;">⚠️ Aucun composant ne correspond aux filtres de processus ou types sélectionnés.</div>';
+  } else {
+    treeBox.innerHTML = multiParentHtml;
+  }
 };
 
 window.togglePmgTreeNode = function(btn) {
@@ -1412,7 +2561,6 @@ window.filterPmgVisualTree = function() {
   });
 };
 
-// Validation steps logic
 window.validatePmgStep2Activities = function() {
   const fileData = window.pmgUploadedFiles['step1'];
   if (!fileData) {
@@ -1450,6 +2598,364 @@ window.validatePmgStep2Activities = function() {
 };
 
 window.validatePmgStep1 = window.validatePmgStep2Activities; // backward alias
+
+
+// =========================================================================
+// 🧹 CLEAN PMG USER GROUP NAME & SMART ENTITY ASSIGNMENT
+// =========================================================================
+
+window.cleanPmgUserGroupName = function(raw) {
+  if (raw == null) return '';
+  let str = String(raw).trim();
+  if (!str) return '';
+
+  // 1. Remove leading '=' if present (Camunda 8 / Zeebe FEEL expression indicator)
+  if (str.startsWith('=')) {
+    str = str.substring(1).trim();
+  }
+
+  // 2. If bracketed: =["CDD_SUPPORT_CENTRAL"] or ['A', 'B'] or [groupeResponsable]
+  if (str.startsWith('[') && str.endsWith(']')) {
+    const inner = str.slice(1, -1).trim();
+    try {
+      const parsed = JSON.parse('[' + inner.replace(/'/g, '"') + ']');
+      if (Array.isArray(parsed)) {
+        return parsed.map(item => String(item).trim()).filter(Boolean).join(', ');
+      }
+    } catch (e) {
+      // Fallback: use inner without brackets
+      str = inner;
+    }
+  }
+
+  // 3. Remove surrounding single or double quotes
+  if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+    str = str.slice(1, -1).trim();
+  }
+
+  // 4. Remove residual quotes for list strings
+  str = str.replace(/["']/g, '').trim();
+
+  return str;
+};
+
+window.openPmgSmartEntityAssignModal = function() {
+  const modal = document.getElementById('modalPmgSmartEntityAssign');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  window.renderPmgSmartEntityAssignContent();
+};
+
+window.closePmgSmartEntityAssignModal = function() {
+  const modal = document.getElementById('modalPmgSmartEntityAssign');
+  if (modal) modal.style.display = 'none';
+};
+
+window.renderPmgSmartEntityAssignContent = function() {
+  const container = document.getElementById('pmgSmartEntityAssignModalBody');
+  if (!container) return;
+
+  const activities = window.pmgTempSubprocesses || window.pmgActivities || [];
+  if (activities.length === 0) {
+    container.innerHTML = '<div style="padding:25px; text-align:center; color:var(--text-tertiary);">⚠️ Aucune activité chargée. Veuillez importer des fichiers BPMN à l\'étape 1.</div>';
+    return;
+  }
+
+  // Extract known entities for quick suggestion chips
+  const knownEntities = new Set();
+  const knownSubprocesses = new Map(); // id -> name
+  let emptyEntityCount = 0;
+  let userTasksCount = 0;
+
+  activities.forEach(act => {
+    if (act.entity && act.entity !== 'Non défini' && act.entity.trim()) {
+      knownEntities.add(act.entity.trim());
+    } else {
+      emptyEntityCount++;
+    }
+
+    const isSub = (act.type || '').toLowerCase().includes('sous-processus') || (act.type || '').toLowerCase().includes('call');
+    if (isSub || act.level === 1) {
+      knownSubprocesses.set(act.name || act.id, act);
+    }
+
+    if ((act.type || '').toLowerCase().includes('user')) {
+      userTasksCount++;
+    }
+  });
+
+  // Suggestion chips HTML
+  let suggestionsHtml = '';
+  knownEntities.forEach(ent => {
+    suggestionsHtml += `<button type="button" class="pmg-filter-pill-btn" onclick="document.getElementById('pmgSmartTargetEntityInput').value='${escAttr(ent)}'; updatePmgSmartEntityPreview();" style="font-size:11px;">🏢 ${escHtml(ent)}</button>`;
+  });
+  if (!suggestionsHtml) {
+    suggestionsHtml = '<span style="font-size:11.5px; color:var(--text-tertiary); font-style:italic;">Aucune entité déjà déclarée</span>';
+  }
+
+  // Subprocesses options
+  let subOptionsHtml = '<option value="">-- Choisir un sous-processus / activité macro --</option>';
+  knownSubprocesses.forEach((sub, name) => {
+    subOptionsHtml += `<option value="${escAttr(sub.id)}">${escHtml(sub.name)} (Niveau ${sub.level || 1})</option>`;
+  });
+
+  // Unique types
+  const typesSet = new Set(activities.map(a => a.typeLabel || a.type).filter(Boolean));
+  let typeOptionsHtml = '';
+  typesSet.forEach(t => {
+    typeOptionsHtml += `<option value="${escAttr(t)}">${escHtml(t)}</option>`;
+  });
+
+  // Existing entities to replace
+  let replaceOptionsHtml = '';
+  knownEntities.forEach(ent => {
+    replaceOptionsHtml += `<option value="${escAttr(ent)}">${escHtml(ent)}</option>`;
+  });
+
+  container.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:16px;">
+      
+      <!-- Section 1 : Périmètre & Stratégie -->
+      <div style="background:var(--bg-hover); border:1px solid var(--border-color); border-radius:var(--border-radius-md); padding:14px;">
+        <label style="font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:8px; display:block;">
+          1. Choisissez la cible / stratégie d'affectation :
+        </label>
+        
+        <div style="display:flex; flex-direction:column; gap:10px; font-size:12.5px;">
+          
+          <!-- Option 1: Sous-Processus et sa cascade -->
+          <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+            <input type="radio" name="pmgSmartScopeMode" value="subprocess_cascade" checked onchange="updatePmgSmartEntityPreview()" style="margin-top:3px;">
+            <div style="flex:1;">
+              <strong>🌳 Par Sous-Processus &amp; Cascade sur toute sa branche descendante</strong>
+              <div style="color:var(--text-secondary); font-size:11.5px; margin-top:2px;">Applique l'entité au sous-processus sélectionné ainsi qu'à l'ensemble de ses activités et tâches enfants.</div>
+              <div id="pmgSmartSubprocessSelectWrap" style="margin-top:6px;">
+                <select id="pmgSmartScopeSubprocess" class="srt" style="width:100%; height:32px; font-size:12px;" onchange="updatePmgSmartEntityPreview()">
+                  ${subOptionsHtml}
+                </select>
+              </div>
+            </div>
+          </label>
+
+          <!-- Option 2: Seulement les cases vides -->
+          <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+            <input type="radio" name="pmgSmartScopeMode" value="empty_only" onchange="updatePmgSmartEntityPreview()" style="margin-top:3px;">
+            <div style="flex:1;">
+              <strong>⚠️ Uniquement les activités sans entité (Vides / Non défini)</strong>
+              <div style="color:var(--text-secondary); font-size:11.5px; margin-top:2px;">Préserve toutes les entités existantes et ne remplit que les <strong>${emptyEntityCount}</strong> case(s) vide(s).</div>
+            </div>
+          </label>
+
+          <!-- Option 3: Auto-Déduction d'après les Groupes Candidats -->
+          <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+            <input type="radio" name="pmgSmartScopeMode" value="group_deduction" onchange="updatePmgSmartEntityPreview()" style="margin-top:3px;">
+            <div style="flex:1;">
+              <strong>🧠 Auto-Déduction Intelligente d'après les Groupes Utilisateurs</strong>
+              <div style="color:var(--text-secondary); font-size:11.5px; margin-top:2px;">Déduit l'entité directement depuis le préfixe du groupe (ex: <code>CDD_SUPPORT_CENTRAL</code> &rarr; <strong>CDD</strong>, <code>ADV_N1</code> &rarr; <strong>ADV</strong>).</div>
+            </div>
+          </label>
+
+          <!-- Option 4: Par Type BPMN -->
+          <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+            <input type="radio" name="pmgSmartScopeMode" value="by_type" onchange="updatePmgSmartEntityPreview()" style="margin-top:3px;">
+            <div style="flex:1;">
+              <strong>🏷️ Par Type de Composant BPMN</strong>
+              <div style="color:var(--text-secondary); font-size:11.5px; margin-top:2px;">Appliquer l'entité à un type de tâche spécifique.</div>
+              <div id="pmgSmartTypeSelectWrap" style="margin-top:6px; display:none;">
+                <select id="pmgSmartScopeType" class="srt" style="width:100%; height:32px; font-size:12px;" onchange="updatePmgSmartEntityPreview()">
+                  ${typeOptionsHtml}
+                </select>
+              </div>
+            </div>
+          </label>
+
+          <!-- Option 5: Remplacer une entité -->
+          <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+            <input type="radio" name="pmgSmartScopeMode" value="replace_entity" onchange="updatePmgSmartEntityPreview()" style="margin-top:3px;">
+            <div style="flex:1;">
+              <strong>🔄 Remplacer une entité existante</strong>
+              <div style="color:var(--text-secondary); font-size:11.5px; margin-top:2px;">Remplace toutes les occurrences d'une entité par une nouvelle.</div>
+              <div id="pmgSmartReplaceSelectWrap" style="margin-top:6px; display:none;">
+                <select id="pmgSmartScopeReplaceSource" class="srt" style="width:100%; height:32px; font-size:12px;" onchange="updatePmgSmartEntityPreview()">
+                  ${replaceOptionsHtml}
+                </select>
+              </div>
+            </div>
+          </label>
+
+          <!-- Option 6: Global à toutes les activités -->
+          <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+            <input type="radio" name="pmgSmartScopeMode" value="all" onchange="updatePmgSmartEntityPreview()" style="margin-top:3px;">
+            <div style="flex:1;">
+              <strong>🌐 Toutes les activités (${activities.length} activités)</strong>
+              <div style="color:var(--text-secondary); font-size:11.5px; margin-top:2px;">Écrase et applique la même entité à toutes les lignes.</div>
+            </div>
+          </label>
+
+        </div>
+      </div>
+
+      <!-- Section 2 : Entité cible -->
+      <div id="pmgSmartTargetEntitySection" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--border-radius-md); padding:14px;">
+        <label style="font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:6px; display:block;">
+          2. Entité / Lane cible à affecter :
+        </label>
+        
+        <input type="text" id="pmgSmartTargetEntityInput" placeholder="Ex: CDD, Direction Métier, Support Client..." oninput="updatePmgSmartEntityPreview()" style="width:100%; height:36px; font-size:13px; border-radius:var(--border-radius-md); border:1px solid var(--border-color); background:var(--bg-primary); color:var(--text-primary); padding:6px 10px;">
+
+        <div style="margin-top:10px;">
+          <div style="font-size:11px; font-weight:600; color:var(--text-secondary); margin-bottom:4px;">Suggestions rapides (entités détectées) :</div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            ${suggestionsHtml}
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 3 : Aperçu des activités impactées -->
+      <div style="border:1px solid var(--border-color); border-radius:var(--border-radius-md); padding:12px; background:var(--bg-primary); max-height:160px; overflow-y:auto;">
+        <div style="font-size:11.5px; font-weight:700; color:var(--text-primary); margin-bottom:6px;">
+          👁️ Aperçu des activités qui seront modifiées :
+        </div>
+        <div id="pmgSmartPreviewList" style="font-size:11.5px; color:var(--text-secondary); line-height:1.5;">
+          Sélectionnez un sous-processus ou un mode ci-dessus...
+        </div>
+      </div>
+
+    </div>
+  `;
+
+  window.updatePmgSmartEntityPreview();
+};
+
+window.getPmgImpactedActivities = function() {
+  const activities = window.pmgTempSubprocesses || window.pmgActivities || [];
+  const mode = document.querySelector('input[name="pmgSmartScopeMode"]:checked')?.value || 'subprocess_cascade';
+  const targetEntity = (document.getElementById('pmgSmartTargetEntityInput')?.value || '').trim();
+
+  let impacted = [];
+
+  if (mode === 'subprocess_cascade') {
+    const subId = document.getElementById('pmgSmartScopeSubprocess')?.value;
+    if (subId) {
+      const targetSub = activities.find(a => a.id === subId);
+      if (targetSub) {
+        impacted.push(targetSub);
+
+        // Find all descendants in hierarchy
+        const parentKeys = new Set([targetSub.id, targetSub.name]);
+        let addedNew = true;
+        while (addedNew) {
+          addedNew = false;
+          activities.forEach(act => {
+            if (!impacted.includes(act)) {
+              if (parentKeys.has(act.parentId) || parentKeys.has(act.embeddedParentId) || (act.parentProcessId && parentKeys.has(act.parentProcessId))) {
+                impacted.push(act);
+                parentKeys.add(act.id);
+                parentKeys.add(act.name);
+                addedNew = true;
+              }
+            }
+          });
+        }
+      }
+    }
+  } else if (mode === 'empty_only') {
+    impacted = activities.filter(a => !a.entity || a.entity === 'Non défini' || a.entity.trim() === '');
+  } else if (mode === 'group_deduction') {
+    impacted = activities.filter(a => {
+      const g = (a.userGroup || '').trim();
+      return g.length > 0;
+    });
+  } else if (mode === 'by_type') {
+    const t = document.getElementById('pmgSmartScopeType')?.value || '';
+    impacted = activities.filter(a => (a.typeLabel || a.type) === t);
+  } else if (mode === 'replace_entity') {
+    const src = document.getElementById('pmgSmartScopeReplaceSource')?.value || '';
+    impacted = activities.filter(a => a.entity === src);
+  } else if (mode === 'all') {
+    impacted = [...activities];
+  }
+
+  return { mode, targetEntity, impacted };
+};
+
+window.updatePmgSmartEntityPreview = function() {
+  const mode = document.querySelector('input[name="pmgSmartScopeMode"]:checked')?.value || 'subprocess_cascade';
+
+  // Toggle sub-selects visibility
+  const typeWrap = document.getElementById('pmgSmartTypeSelectWrap');
+  const replaceWrap = document.getElementById('pmgSmartReplaceSelectWrap');
+  const targetSec = document.getElementById('pmgSmartTargetEntitySection');
+
+  if (typeWrap) typeWrap.style.display = mode === 'by_type' ? 'block' : 'none';
+  if (replaceWrap) replaceWrap.style.display = mode === 'replace_entity' ? 'block' : 'none';
+  if (targetSec) targetSec.style.display = mode === 'group_deduction' ? 'none' : 'block';
+
+  const { targetEntity, impacted } = window.getPmgImpactedActivities();
+
+  const impactCountEl = document.getElementById('pmgSmartEntityImpactCount');
+  if (impactCountEl) {
+    impactCountEl.innerHTML = `📊 Impact : <strong>${impacted.length}</strong> activité(s) sélectionnée(s)`;
+  }
+
+  const previewListEl = document.getElementById('pmgSmartPreviewList');
+  if (previewListEl) {
+    if (impacted.length === 0) {
+      previewListEl.innerHTML = '<span style="color:var(--text-tertiary); font-style:italic;">Aucune activité ciblée par ce critère.</span>';
+    } else {
+      let itemsHtml = impacted.slice(0, 15).map(a => {
+        let dest = targetEntity || 'Entité cible';
+        if (mode === 'group_deduction') {
+          const gClean = window.cleanPmgUserGroupName(a.userGroup);
+          const prefix = gClean.split('_')[0] || gClean;
+          dest = prefix.toUpperCase();
+        }
+        return `<div style="margin-bottom:3px;">• <strong>${escHtml(a.name)}</strong> (${escHtml(a.typeLabel || a.type)}) : <span style="text-decoration:line-through; color:var(--text-tertiary);">${escHtml(a.entity || 'Non défini')}</span> &rarr; <span style="color:var(--ok); font-weight:700;">${escHtml(dest)}</span></div>`;
+      }).join('');
+
+      if (impacted.length > 15) {
+        itemsHtml += `<div style="color:var(--brand-primary); font-weight:600; margin-top:4px;">... et ${impacted.length - 15} autre(s) activité(s)</div>`;
+      }
+      previewListEl.innerHTML = itemsHtml;
+    }
+  }
+};
+
+window.applyPmgSmartEntityAssignment = function() {
+  const { mode, targetEntity, impacted } = window.getPmgImpactedActivities();
+
+  if (impacted.length === 0) {
+    alert("Aucune activité n'a été sélectionnée.");
+    return;
+  }
+
+  if (mode !== 'group_deduction' && !targetEntity) {
+    alert("Veuillez saisir le nom de l'entité cible à affecter.");
+    return;
+  }
+
+  let count = 0;
+  impacted.forEach(act => {
+    if (mode === 'group_deduction') {
+      const gClean = window.cleanPmgUserGroupName(act.userGroup);
+      const prefix = (gClean.split('_')[0] || gClean).trim().toUpperCase();
+      act.entity = prefix || 'Non défini';
+      act.isInheritedEntity = false;
+      count++;
+    } else {
+      act.entity = targetEntity;
+      act.isInheritedEntity = false;
+      count++;
+    }
+  });
+
+  window.closePmgSmartEntityAssignModal();
+
+  if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
+  if (window.renderPmgMatrix) window.renderPmgMatrix();
+
+  alert(`🎉 Affectation réussie ! ${count} activité(s) mise(s) à jour avec succès.`);
+};
 
 window.validatePmgStep3Entities = function() {
   const mode = document.querySelector('input[name="pmgStep2AssignMode"]:checked')?.value || 'excel';
@@ -1550,28 +3056,89 @@ window.renderPmgStep3ManualTable = function() {
     return;
   }
 
+  // Populate dynamic types in filter
+  const typeSelect = document.getElementById('pmgFilterStep4Type');
+  if (typeSelect) {
+    const currentVal = window.pmgColFilters.step4.type || 'all';
+    const typeMap = new Map();
+    activities.forEach(a => {
+      const k = window.getPmgTypeKey(a.type || a.typeLabel);
+      const l = a.typeLabel || a.type || 'Tâche';
+      typeMap.set(k, { label: l, count: (typeMap.get(k)?.count || 0) + 1 });
+    });
+    let typeOpts = '<option value="all">Tous les types (' + activities.length + ')</option>';
+    for (const [k, v] of typeMap.entries()) {
+      typeOpts += '<option value="' + escAttr(k) + '" ' + (k === currentVal ? 'selected' : '') + '>' + escHtml(v.label) + ' (' + v.count + ')</option>';
+    }
+    typeSelect.innerHTML = typeOpts;
+  }
+
+  // Filter activities
+  const f = window.pmgColFilters.step4;
+  const filtered = activities.filter(act => {
+    if (f.act) {
+      const name = (act.name || '').toLowerCase();
+      const id = (act.id || '').toLowerCase();
+      if (!name.includes(f.act) && !id.includes(f.act)) return false;
+    }
+
+    if (f.type !== 'all') {
+      const k = window.getPmgTypeKey(act.type || act.typeLabel);
+      if (k !== f.type) return false;
+    }
+
+    const ins = act.inputs || [];
+    const outs = act.outputs || [];
+
+    if (f.inStatus === 'has' && ins.length === 0) return false;
+    if (f.inStatus === 'none' && ins.length > 0) return false;
+    if (f.inText && !ins.some(v => v.toLowerCase().includes(f.inText))) return false;
+
+    if (f.outStatus === 'has' && outs.length === 0) return false;
+    if (f.outStatus === 'none' && outs.length > 0) return false;
+    if (f.outText && !outs.some(v => v.toLowerCase().includes(f.outText))) return false;
+
+    return true;
+  });
+
+  // Update count badge
+  const countBadge = document.getElementById('pmgStep4FilterCount');
+  if (countBadge) {
+    countBadge.innerHTML = '🎯 <strong>' + filtered.length + '</strong> / ' + activities.length + ' activités affichées';
+  }
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:25px; text-align:center; color:var(--text-tertiary); font-style:italic;">Aucune activité ne correspond aux filtres variables. <button class="btn-ghost" style="margin-left:8px; font-size:11px;" onclick="resetPmgStep4Filters()">Réinitialiser</button></td></tr>';
+    return;
+  }
+
   let html = '';
-  activities.forEach((act, idx) => {
+  filtered.forEach((act) => {
+    const origIdx = activities.indexOf(act);
     const inputsVal = (act.inputs || []).join(', ');
     const outputsVal = (act.outputs || []).join(', ');
 
+    const parentProcLabel = act.parentProcessName || act.rootParentName || 'Processus Principal';
     html += `
       <tr style="border-bottom: 1px solid var(--border-color);">
-        <td style="padding: 8px;">
+        <td style="padding: 8px; vertical-align: top;">
           <span style="display:inline-block; margin-left:${(act.level - 1) * 12}px;">
-            ${act.level > 1 ? '└─ ' : ''}<strong>${act.name}</strong>
+            ${act.level > 1 ? '<span style="color:#009cd7;">└─ </span>' : ''}<strong>${escHtml(act.name)}</strong>
           </span>
+          <div style="font-size:10.5px; color:#94a3b8; margin-left:${(act.level - 1) * 12}px; margin-top:2px;">
+            id: <code>${escHtml(act.id)}</code> • <em style="color:#009cd7; font-weight:500;">🏛️ ${escHtml(parentProcLabel)}</em>
+          </div>
         </td>
         <td style="padding: 8px;">
-          <span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(59, 130, 246, 0.1); color: var(--brand-primary);">
-            ${act.type}
+          <span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(59, 130, 246, 0.1); color: var(--brand-primary); font-weight:600;">
+            ${escHtml(act.typeLabel || act.type)}
           </span>
         </td>
         <td style="padding: 6px;">
-          <input type="text" id="pmgInputsInput_${idx}" value="${inputsVal}" placeholder="Ex: varIn1, varIn2" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
+          <input type="text" id="pmgInputsInput_${origIdx}" value="${escAttr(inputsVal)}" placeholder="Ex: varIn1, varIn2" oninput="syncPmgStepActivityField('${escAttr(act.id)}', 'inputs', this.value)" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
         </td>
         <td style="padding: 6px;">
-          <input type="text" id="pmgOutputsInput_${idx}" value="${outputsVal}" placeholder="Ex: varOut1, varOut2" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
+          <input type="text" id="pmgOutputsInput_${origIdx}" value="${escAttr(outputsVal)}" placeholder="Ex: varOut1, varOut2" oninput="syncPmgStepActivityField('${escAttr(act.id)}', 'outputs', this.value)" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
         </td>
       </tr>
     `;
@@ -1695,9 +3262,64 @@ window.renderPmgStep4ManualTable = function() {
 
   const modes = window.pmgRealizationModes || ['SP0', 'Call Activity', 'Manuelle', 'Automatique'];
 
+  // Populate mode filter dropdown
+  const modeSelectFilter = document.getElementById('pmgFilterStep5Mode');
+  if (modeSelectFilter) {
+    const currentVal = window.pmgColFilters.step5.mode || 'all';
+    let modeOpts = '<option value="all">Tous les modes (' + activities.length + ')</option>';
+    modes.forEach(m => {
+      const cnt = activities.filter(a => (a.realizationMode || '').toLowerCase() === m.toLowerCase()).length;
+      modeOpts += '<option value="' + escAttr(m) + '" ' + (m.toLowerCase() === currentVal.toLowerCase() ? 'selected' : '') + '>' + escHtml(m) + ' (' + cnt + ')</option>';
+    });
+    modeSelectFilter.innerHTML = modeOpts;
+  }
+
+  // Filter activities
+  const f = window.pmgColFilters.step5;
+  const filtered = activities.filter(act => {
+    if (f.act) {
+      const name = (act.name || '').toLowerCase();
+      const id = (act.id || '').toLowerCase();
+      if (!name.includes(f.act) && !id.includes(f.act)) return false;
+    }
+
+    if (f.mode !== 'all') {
+      const curMode = (act.realizationMode || '').toLowerCase();
+      if (curMode !== f.mode.toLowerCase()) return false;
+    }
+
+    if (f.case) {
+      const c = (act.applicableCase || '').toLowerCase();
+      if (!c.includes(f.case)) return false;
+    }
+
+    if (f.comment) {
+      const c = (act.comment || '').toLowerCase();
+      if (f.comment === '__no_doc__') {
+        if (c.trim().length > 0) return false;
+      } else {
+        if (!c.includes(f.comment)) return false;
+      }
+    }
+
+    return true;
+  });
+
+  // Update count badge
+  const countBadge = document.getElementById('pmgStep5FilterCount');
+  if (countBadge) {
+    countBadge.innerHTML = '🎯 <strong>' + filtered.length + '</strong> / ' + activities.length + ' activités affichées';
+  }
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:25px; text-align:center; color:var(--text-tertiary); font-style:italic;">Aucune activité ne correspond aux filtres. <button class="btn-ghost" style="margin-left:8px; font-size:11px;" onclick="resetPmgStep5Filters()">Réinitialiser</button></td></tr>';
+    return;
+  }
+
   let html = '';
-  activities.forEach((act, idx) => {
-    const isSub = act.type.toLowerCase().includes('sous-processus') || act.type.toLowerCase().includes('call');
+  filtered.forEach((act) => {
+    const origIdx = activities.indexOf(act);
+    const isSub = (act.type || '').toLowerCase().includes('sous-processus') || (act.type || '').toLowerCase().includes('call');
     const defaultMode = act.realizationMode || (isSub ? 'Call Activity' : 'Manuelle');
     const caseVal = act.applicableCase || '';
     const commentVal = act.comment || '';
@@ -1705,26 +3327,30 @@ window.renderPmgStep4ManualTable = function() {
     let optionsHtml = '';
     modes.forEach(m => {
       const selected = m.toLowerCase() === defaultMode.toLowerCase() ? 'selected' : '';
-      optionsHtml += `<option value="${m}" ${selected}>${m}</option>`;
+      optionsHtml += '<option value="' + escAttr(m) + '" ' + selected + '>' + escHtml(m) + '</option>';
     });
 
+    const parentProcLabel = act.parentProcessName || act.rootParentName || 'Processus Principal';
     html += `
       <tr style="border-bottom: 1px solid var(--border-color);">
-        <td style="padding: 8px;">
+        <td style="padding: 8px; vertical-align: top;">
           <span style="display:inline-block; margin-left:${(act.level - 1) * 12}px;">
-            ${act.level > 1 ? '└─ ' : ''}<strong>${act.name}</strong>
+            ${act.level > 1 ? '<span style="color:#009cd7;">└─ </span>' : ''}<strong>${escHtml(act.name)}</strong>
           </span>
+          <div style="font-size:10.5px; color:#94a3b8; margin-left:${(act.level - 1) * 12}px; margin-top:2px;">
+            id: <code>${escHtml(act.id)}</code> • <em style="color:#009cd7; font-weight:500;">🏛️ ${escHtml(parentProcLabel)}</em>
+          </div>
         </td>
         <td style="padding: 6px;">
-          <select id="pmgModeSelect_${idx}" class="srt" style="width: 100%; height: 32px; font-size: 12px;">
+          <select id="pmgModeSelect_${origIdx}" class="srt" onchange="syncPmgStepActivityField('${escAttr(act.id)}', 'realizationMode', this.value)" style="width: 100%; height: 32px; font-size: 12px;">
             ${optionsHtml}
           </select>
         </td>
         <td style="padding: 6px;">
-          <input type="text" id="pmgCaseInput_${idx}" value="${caseVal}" placeholder="Ex: Si dossier prioritaire" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
+          <input type="text" id="pmgCaseInput_${origIdx}" value="${escAttr(caseVal)}" placeholder="Ex: Si dossier prioritaire" oninput="syncPmgStepActivityField('${escAttr(act.id)}', 'applicableCase', this.value)" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
         </td>
         <td style="padding: 6px;">
-          <input type="text" id="pmgCommentInput_${idx}" value="${commentVal}" placeholder="Ex: Traitement physique" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
+          <input type="text" id="pmgCommentInput_${origIdx}" value="${escAttr(commentVal)}" placeholder="Ex: Traitement physique" oninput="syncPmgStepActivityField('${escAttr(act.id)}', 'comment', this.value)" style="width: 100%; height: 32px; font-size: 12px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); padding: 4px 8px;">
         </td>
       </tr>
     `;
@@ -1846,11 +3472,10 @@ window.handlePmgOneShotBpmnFiles = function(files) {
     return;
   }
 
-  // Visual feedback on dropzone
   const uploadTitle = document.getElementById('uploadTitlePmgOneShot');
   const uploadSub = document.getElementById('uploadSubPmgOneShot');
   if (uploadTitle) uploadTitle.textContent = `Chargement & Analyse de ${validFiles.length} fichier(s) BPMN...`;
-  if (uploadSub) uploadSub.textContent = `Traitement des dépendances et extraction des données en cours...`;
+  if (uploadSub) uploadSub.textContent = `Traitement des dépendances et extraction multi-processus en cours...`;
 
   const filePromises = validFiles.map(file => {
     return new Promise((resolve, reject) => {
@@ -1863,10 +3488,12 @@ window.handlePmgOneShotBpmnFiles = function(files) {
 
   Promise.all(filePromises)
     .then(fileEntries => {
+      window.pmgCurrentFileEntries = fileEntries;
       const batchResult = window.parseBpmnBatchForPmg(fileEntries);
       window.populatePmgAllStepsFromBpmnBatch(batchResult);
       if (uploadTitle) uploadTitle.textContent = `✅ ${validFiles.length} fichier(s) BPMN importé(s) avec succès !`;
-      if (uploadSub) uploadSub.textContent = `Processus parent : "${batchResult.rootProcess.name}" (${batchResult.structuredActivities.length} activités extraites)`;
+      const rootNames = batchResult.rootProcesses.map((r, i) => `P${i + 1}: ${r.name}`).join(', ');
+      if (uploadSub) uploadSub.textContent = `${batchResult.rootProcesses.length} processus parent(s) racine(s) (${rootNames}) — ${batchResult.structuredActivities.length} activités extraites`;
     })
     .catch(err => {
       console.error("Erreur lors de l'import BPMN One-Shot :", err);
@@ -1875,10 +3502,70 @@ window.handlePmgOneShotBpmnFiles = function(files) {
     });
 };
 
+
+// Détecteur intelligent de type d'activité BPMN (Camunda 7, Camunda 8 Zeebe, BPMN 2.0 standard)
+window.detectBpmnElementType = function(el, fallbackName) {
+  if (!el) return fallbackName || 'task';
+  const rawLn = (fallbackName || el.localName || '').toLowerCase();
+
+  // 1. Déjà explicitement balisé
+  if (rawLn === 'scripttask') return 'scripttask';
+  if (rawLn === 'usertask') return 'usertask';
+  if (rawLn === 'businessruletask') return 'businessruletask';
+  if (rawLn === 'manualtask') return 'manualtask';
+  if (rawLn === 'callactivity') return 'callactivity';
+  if (rawLn === 'subprocess' || rawLn === 'sub-process') return 'subprocess';
+  if (rawLn === 'sendtask') return 'sendtask';
+  if (rawLn === 'receivetask') return 'receivetask';
+
+  // 2. Inspection des balises enfants et extensions Camunda 7 / Zeebe 8
+  // A. Script Task (FEEL, Zeebe Script, Groovy, JS)
+  const hasScriptTag = !!el.querySelector('script, zeebe\\:script, camunda\\:script');
+  const hasScriptFormat = el.hasAttribute('scriptFormat') || el.hasAttribute('camunda:scriptFormat');
+  const taskDef = el.querySelector('taskDefinition, zeebe\\:taskDefinition');
+  const taskDefType = taskDef ? (taskDef.getAttribute('type') || '').toLowerCase() : '';
+
+  if (hasScriptTag || hasScriptFormat || taskDefType.includes('script') || taskDefType.includes('feel')) {
+    return 'scripttask';
+  }
+
+  // B. User Task (Zeebe UserTask, FormDefinition, CandidateGroups, Assignee)
+  const hasUserTaskTag = !!el.querySelector('userTask, zeebe\\:userTask, formDefinition, zeebe\\:formDefinition, assignmentDefinition, zeebe\\:assignmentDefinition');
+  const hasUserAttrs = el.hasAttribute('camunda:candidateGroups') || el.hasAttribute('candidateGroups') || el.hasAttribute('camunda:assignee') || el.hasAttribute('assignee') || el.hasAttribute('camunda:formKey');
+  if (hasUserTaskTag || hasUserAttrs) {
+    return 'usertask';
+  }
+
+  // C. Business Rule / DMN
+  const hasDmn = !!el.querySelector('calledDecision, zeebe\\:calledDecision') || el.hasAttribute('camunda:decisionRef') || el.hasAttribute('decisionRef') || taskDefType.includes('dmn') || taskDefType.includes('decision');
+  if (hasDmn) {
+    return 'businessruletask';
+  }
+
+  // D. Call Activity
+  const hasCall = !!el.querySelector('calledElement, zeebe\\:calledElement') || el.hasAttribute('calledElement');
+  if (hasCall) {
+    return 'callactivity';
+  }
+
+  // E. Service Task
+  if (rawLn === 'servicetask' || taskDef || el.hasAttribute('camunda:delegateExpression') || el.hasAttribute('camunda:topic') || el.hasAttribute('camunda:class') || el.getAttribute('camunda:type') === 'external') {
+    return 'servicetask';
+  }
+
+  // F. Send / Receive
+  if (el.querySelector('messageEventDefinition, bpmn\\:messageEventDefinition')) {
+    return 'sendtask';
+  }
+
+  return rawLn;
+};
+
 window.parseBpmnBatchForPmg = function(fileEntries) {
   const parser = new DOMParser();
   const processCatalog = new Map(); // processId -> ProcessData
   const allCalledElements = new Set();
+  const callersMap = new Map(); // calledElementId -> Array of { callerProcId, callerProcName, callActId, callActName, fileName }
   const parsedFiles = [];
 
   const TYPE_LABELS = {
@@ -1905,7 +3592,23 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
 
       parsedFiles.push(entry.fileName);
 
-      // 1. Participant / Pool mapping (processRef -> Pool Name)
+      // Extract BPMNDI Coordinates (X, Y, Width, Height)
+      const shapeMap = new Map();
+      const shapes = xmlDoc.querySelectorAll('BPMNShape, bpmndi\\:BPMNShape');
+      shapes.forEach(sh => {
+        const bpmnEl = sh.getAttribute('bpmnElement');
+        if (!bpmnEl) return;
+        const bounds = sh.querySelector('Bounds, dc\\:Bounds, bpmndi\\:Bounds');
+        if (bounds) {
+          const x = parseFloat(bounds.getAttribute('x')) || 0;
+          const y = parseFloat(bounds.getAttribute('y')) || 0;
+          const w = parseFloat(bounds.getAttribute('width')) || 0;
+          const h = parseFloat(bounds.getAttribute('height')) || 0;
+          shapeMap.set(bpmnEl, { x, y, width: w, height: h });
+        }
+      });
+
+      // 1. Participant / Pool mapping
       const processIdToPool = new Map();
       const participants = xmlDoc.querySelectorAll('participant, bpmn\\:participant');
       participants.forEach(p => {
@@ -1921,16 +3624,14 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
         const procName = procEl.getAttribute('name') || entry.fileName.replace(/\.(bpmn|xml)$/i, '') || procId;
         const isExecutable = procEl.getAttribute('isExecutable') || 'false';
         
-        // Process documentation
         const procDocEl = procEl.querySelector(':scope > documentation, :scope > bpmn\\:documentation');
         const procDoc = procDocEl ? procDocEl.textContent.trim() : '';
 
-        // Exporter details from definitions
         const defs = xmlDoc.documentElement;
         const exporter = defs.getAttribute('exporter') || 'Camunda Modeler';
         const exporterVersion = defs.getAttribute('exporterVersion') || '5.x';
 
-        // 3. Lane Mapping (flowNodeRef -> Lane Name)
+        // 3. Lane Mapping
         const nodeToLane = new Map();
         const lanes = procEl.querySelectorAll('lane, bpmn\\:lane');
         lanes.forEach(lane => {
@@ -1942,7 +3643,7 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
           });
         });
 
-        // 4. Gateways & Sequence flows mapping (targetRef -> intelligent condition / expression)
+        // 4. Gateways & Sequence flows mapping
         const gatewayNames = new Map();
         const gateways = procEl.querySelectorAll('exclusiveGateway, bpmn\\:exclusiveGateway, inclusiveGateway, bpmn\\:inclusiveGateway, complexGateway, bpmn\\:complexGateway, eventBasedGateway, bpmn\\:eventBasedGateway');
         gateways.forEach(gw => {
@@ -1953,6 +3654,9 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
 
         const targetToCondition = new Map();
         const seqFlows = procEl.querySelectorAll('sequenceFlow, bpmn\\:sequenceFlow');
+        const flowAdj = new Map();
+        const incomingCount = new Map();
+
         seqFlows.forEach(sf => {
           const targetRef = sf.getAttribute('targetRef');
           const sourceRef = sf.getAttribute('sourceRef');
@@ -1979,7 +3683,39 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
           if (targetRef && composedCond) {
             targetToCondition.set(targetRef, composedCond);
           }
+
+          if (sourceRef && targetRef) {
+            if (!flowAdj.has(sourceRef)) flowAdj.set(sourceRef, []);
+            flowAdj.get(sourceRef).push(targetRef);
+            incomingCount.set(targetRef, (incomingCount.get(targetRef) || 0) + 1);
+          }
         });
+
+        // Compute Execution Flow Topological Order (BFS from startEvents)
+        const startEvents = [];
+        const startNodes = procEl.querySelectorAll('startEvent, bpmn\\:startEvent');
+        startNodes.forEach(sn => {
+          const sId = sn.getAttribute('id');
+          if (sId) startEvents.push(sId);
+        });
+
+        const flowRank = new Map();
+        const visitedFlow = new Set();
+        let currentRank = 1;
+        const queue = startEvents.length > 0 ? [...startEvents] : [];
+
+        while (queue.length > 0) {
+          const currId = queue.shift();
+          if (visitedFlow.has(currId)) continue;
+          visitedFlow.add(currId);
+          flowRank.set(currId, currentRank++);
+          const targets = flowAdj.get(currId) || [];
+          targets.forEach(tgt => {
+            if (!visitedFlow.has(tgt)) {
+              queue.push(tgt);
+            }
+          });
+        }
 
         // 5. Extract Tasks & Activities with deep metadata
         const activities = [];
@@ -1987,27 +3723,41 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
         const poolName = processIdToPool.get(procId) || '';
 
         const allNodes = procEl.getElementsByTagName('*');
+        let xmlOrderCounter = 1;
+
         for (let i = 0; i < allNodes.length; i++) {
           const el = allNodes[i];
-          const localName = (el.localName || '').toLowerCase();
+          
+          if (el.prefix === 'zeebe' || el.prefix === 'camunda' || el.prefix === 'modeler') continue;
+          let isExt = false;
+          let pNode = el.parentElement;
+          while (pNode && pNode !== procEl && pNode.nodeType === 1) {
+            const pLn = (pNode.localName || '').toLowerCase();
+            if (pLn === 'extensionelements' || pLn === 'extension_elements') {
+              isExt = true;
+              break;
+            }
+            pNode = pNode.parentElement;
+          }
+          if (isExt) continue;
 
-          if (['usertask', 'servicetask', 'manualtask', 'scripttask', 'sendtask', 'receivetask', 'businessruletask', 'task', 'callactivity', 'subprocess'].includes(localName)) {
+          const rawLocalName = (el.localName || '').toLowerCase();
+
+          if (['usertask', 'servicetask', 'manualtask', 'scripttask', 'sendtask', 'receivetask', 'businessruletask', 'task', 'callactivity', 'subprocess'].includes(rawLocalName)) {
+            const localName = window.detectBpmnElementType(el, rawLocalName);
             const actId = el.getAttribute('id') || `act_${activities.length + 1}`;
             const actName = el.getAttribute('name') || actId;
 
-            const laneName = nodeToLane.get(actId) || '';
+            const rawLaneName = nodeToLane.get(actId) || '';
             let entity = '';
-            if (poolName && laneName) {
-              entity = `${poolName} (Lane: ${laneName})`;
-            } else if (laneName) {
-              entity = `Lane: ${laneName}`;
+            if (rawLaneName) {
+              entity = rawLaneName.replace(/^Lane\s*:\s*/i, '').trim();
             } else if (poolName) {
-              entity = poolName;
+              entity = poolName.replace(/^Pool\s*:\s*/i, '').trim();
             } else {
-              entity = ''; // Left clean if no Lane/Pool
+              entity = '';
             }
 
-            // User Groups / Candidates detection
             let userGroup = '';
             let userGroupWarning = false;
 
@@ -2026,15 +3776,14 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
                 const assignee = el.getAttribute('camunda:assignee') || el.getAttribute('assignee') || '';
                 if (assignee) userGroup = `Assigné: ${assignee}`;
               }
+              if (userGroup && typeof window.cleanPmgUserGroupName === 'function') {
+                userGroup = window.cleanPmgUserGroupName(userGroup);
+              }
               if (!userGroup) {
                 userGroupWarning = true;
               }
-            } else {
-              userGroup = '';
-              userGroupWarning = false;
             }
 
-            // Realization Mode deduction
             let realizationMode = 'Manuelle';
             if (localName === 'callactivity' || localName === 'subprocess') {
               realizationMode = 'Call Activity';
@@ -2044,17 +3793,11 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
               realizationMode = 'SP0';
             }
 
-            // Condition on incoming flow (or empty for manual input)
             const applicableCase = targetToCondition.get(actId) || '';
-
-            // Task Documentation comment
             const taskDocEl = el.querySelector(':scope > documentation, :scope > bpmn\\:documentation');
             const comment = taskDocEl ? taskDocEl.textContent.trim() : '';
-
-            // Extract IO cleanly
             const { inputs, outputs } = extractIoForNode(el);
 
-            // CallActivity specific target element
             let calledElement = '';
             if (localName === 'callactivity') {
               calledElement = el.getAttribute('calledElement') || '';
@@ -2062,11 +3805,22 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
               if (zeebeCalled && !calledElement) {
                 calledElement = zeebeCalled.getAttribute('processId') || '';
               }
-              if (calledElement) allCalledElements.add(calledElement);
-              callActivities.push({ actId, actName, calledElement });
+              if (calledElement) {
+                allCalledElements.add(calledElement);
+                if (!callersMap.has(calledElement)) {
+                  callersMap.set(calledElement, []);
+                }
+                callersMap.get(calledElement).push({
+                  callerProcId: procId,
+                  callerProcName: procName,
+                  callActId: actId,
+                  callActName: actName,
+                  fileName: entry.fileName
+                });
+                callActivities.push({ actId, actName, calledElement });
+              }
             }
 
-            // Check if element is inside an embedded subProcess
             let embeddedParentId = '';
             let parentEl = el.parentElement;
             while (parentEl && parentEl !== procEl) {
@@ -2077,6 +3831,9 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
               }
               parentEl = parentEl.parentElement;
             }
+
+            const bounds = shapeMap.get(actId) || { x: 0, y: 0, width: 0, height: 0 };
+            const nodeFlowRank = flowRank.get(actId) != null ? flowRank.get(actId) : (currentRank + xmlOrderCounter);
 
             activities.push({
               id: actId,
@@ -2094,7 +3851,13 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
               calledElement,
               embeddedParentId,
               processId: procId,
-              fileName: entry.fileName
+              fileName: entry.fileName,
+              xmlOrder: xmlOrderCounter++,
+              flowOrder: nodeFlowRank,
+              diagramX: bounds.x,
+              diagramY: bounds.y,
+              diagramWidth: bounds.width,
+              diagramHeight: bounds.height
             });
           }
         }
@@ -2121,75 +3884,163 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
     throw new Error("Aucun processus BPMN valide trouvé dans les fichiers importés.");
   }
 
-  // 6. Identify Root (Parent) Process: Process not called by any other process in the batch
-  let rootProcess = null;
+  // 6. Identify Root (Parent) Processes (P1, P2, P3...)
+  let detectedRoots = [];
   for (const [procId, procData] of processCatalog.entries()) {
     if (!allCalledElements.has(procId)) {
-      rootProcess = procData;
-      break;
+      detectedRoots.push(procData);
     }
   }
-  if (!rootProcess) {
-    rootProcess = processCatalog.values().next().value;
+  if (detectedRoots.length === 0) {
+    detectedRoots = Array.from(processCatalog.values());
   }
 
-  // 7. Recursive Tree Construction to build hierarchical activities list
+  // Support explicit user selection of parents
+  let effectiveRoots = detectedRoots;
+  if (window.pmgExplicitParents && window.pmgExplicitParents.size > 0) {
+    const chosen = [];
+    window.pmgExplicitParents.forEach(pId => {
+      if (processCatalog.has(pId)) chosen.push(processCatalog.get(pId));
+    });
+    if (chosen.length > 0) effectiveRoots = chosen;
+  }
+
+  // 7. Detect Shared Subprocesses (called by >=2 callers or multiple parents)
+  const sharedSubprocessesList = [];
+  for (const [procId, procData] of processCatalog.entries()) {
+    const callers = callersMap.get(procId) || [];
+    const distinctCallerProcIds = new Set(callers.map(c => c.callerProcId));
+    if (callers.length >= 2 || distinctCallerProcIds.size >= 2) {
+      procData.isShared = true;
+      procData.callers = callers;
+      procData.sharedParentNames = Array.from(new Set(callers.map(c => c.callerProcName || c.callerProcId)));
+      sharedSubprocessesList.push({
+        processId: procId,
+        processName: procData.name,
+        callerCount: callers.length,
+        distinctParentCount: distinctCallerProcIds.size,
+        callers: callers,
+        sharedParentNames: procData.sharedParentNames
+      });
+    } else {
+      procData.isShared = false;
+      procData.callers = callers;
+      procData.sharedParentNames = callers.map(c => c.callerProcName || c.callerProcId);
+    }
+  }
+
+  // 8. Recursive Tree Construction across ALL Effective Root Parents
   const structuredActivities = [];
   const resolvedSubprocesses = new Set();
   const missingSubprocesses = [];
 
-  function traverseProcess(procId, currentLevel, parentNodeId, branchPath) {
-    const proc = processCatalog.get(procId);
-    if (!proc) {
-      missingSubprocesses.push({ calledElement: procId, calledBy: parentNodeId });
-      return;
+  effectiveRoots.forEach(rootProc => {
+    function traverseProcess(procId, currentLevel, parentNodeId, branchPath, rootParent, inheritedEntity) {
+      const proc = processCatalog.get(procId);
+      if (!proc) {
+        missingSubprocesses.push({ calledElement: procId, calledBy: parentNodeId });
+        return;
+      }
+
+      resolvedSubprocesses.add(procId);
+
+      proc.activities.forEach(act => {
+        const uniqueHierarchicalId = `${rootParent.id}_${procId}_${act.id}`;
+        const effectiveParentId = act.embeddedParentId 
+          ? `${rootParent.id}_${procId}_${act.embeddedParentId}` 
+          : (parentNodeId || (currentLevel > 1 ? parentNodeId : ''));
+        const effectiveLevel = act.embeddedParentId ? currentLevel + 1 : currentLevel;
+
+        let isMissingTarget = false;
+        if (act.type === 'callactivity' && act.calledElement) {
+          if (!processCatalog.has(act.calledElement)) {
+            isMissingTarget = true;
+            missingSubprocesses.push({ calledElement: act.calledElement, calledBy: act.name });
+          }
+        }
+
+        const isProcShared = !!proc.isShared;
+        const sharedParentNames = proc.sharedParentNames || (rootParent.name ? [rootParent.name] : []);
+
+        let finalEntity = act.entity || '';
+        let isInheritedEntity = false;
+        if (!finalEntity && inheritedEntity) {
+          finalEntity = inheritedEntity;
+          isInheritedEntity = true;
+        }
+
+        const activityRecord = {
+          ...act,
+          id: act.id,
+          entity: finalEntity,
+          isInheritedEntity: isInheritedEntity,
+          uniqueId: uniqueHierarchicalId,
+          parentId: effectiveParentId,
+          level: effectiveLevel,
+          rootParentId: rootParent.id,
+          rootParentName: rootParent.name,
+          parentProcessId: procId,
+          parentProcessName: proc.name,
+          targetMissing: isMissingTarget,
+          isSharedSubprocess: isProcShared,
+          sharedParentNames: sharedParentNames,
+          callers: proc.callers || [],
+          xmlOrder: act.xmlOrder,
+          flowOrder: act.flowOrder,
+          diagramX: act.diagramX,
+          diagramY: act.diagramY
+        };
+
+        structuredActivities.push(activityRecord);
+
+        if (act.type === 'callactivity' && act.calledElement) {
+          const childProcId = act.calledElement;
+          const nextBranch = branchPath + '->' + childProcId;
+          if (!branchPath.includes(childProcId) && processCatalog.has(childProcId)) {
+            const nextInheritedEntity = act.entity || inheritedEntity || '';
+            traverseProcess(childProcId, currentLevel + 1, uniqueHierarchicalId, nextBranch, rootParent, nextInheritedEntity);
+          }
+        }
+      });
     }
 
-    resolvedSubprocesses.add(procId);
+    traverseProcess(rootProc.id, 1, '', rootProc.id, rootProc, '');
+  });
 
-    proc.activities.forEach(act => {
-      const uniqueHierarchicalId = `${procId}_${act.id}`;
-      const effectiveParentId = act.embeddedParentId || parentNodeId || (currentLevel > 1 ? parentNodeId : '');
-      const effectiveLevel = act.embeddedParentId ? currentLevel + 1 : currentLevel;
-
-      const activityRecord = {
-        ...act,
-        id: act.id,
-        uniqueId: uniqueHierarchicalId,
-        parentId: effectiveParentId,
-        level: effectiveLevel,
-        parentProcessId: procId,
-        parentProcessName: proc.name
-      };
-
-      structuredActivities.push(activityRecord);
-
-      // If Call Activity, recursively traverse the called process
-      if (act.type === 'callactivity' && act.calledElement) {
-        const childProcId = act.calledElement;
-        const nextBranch = branchPath + '->' + childProcId;
-        if (!branchPath.includes(childProcId) && processCatalog.has(childProcId)) {
-          traverseProcess(childProcId, currentLevel + 1, act.id, nextBranch);
-        } else if (!processCatalog.has(childProcId)) {
-          missingSubprocesses.push({ calledElement: childProcId, calledBy: act.name });
-        }
-      }
-    });
-  }
-
-  traverseProcess(rootProcess.id, 1, '', rootProcess.id);
-
-  // If there are unlinked processes in the catalog, append them at level 1
+  // Append any unresolved unlinked process at level 1
   for (const [procId, procData] of processCatalog.entries()) {
-    if (!resolvedSubprocesses.has(procId)) {
-      traverseProcess(procId, 1, '', procId);
+    if (!resolvedSubprocesses.has(procId) && !effectiveRoots.some(r => r.id === procId)) {
+      procData.activities.forEach(act => {
+        structuredActivities.push({
+          ...act,
+          id: act.id,
+          uniqueId: `orphan_${procId}_${act.id}`,
+          parentId: '',
+          level: 1,
+          rootParentId: procId,
+          rootParentName: procData.name,
+          parentProcessId: procId,
+          parentProcessName: procData.name,
+          targetMissing: false,
+          isSharedSubprocess: false,
+          sharedParentNames: [procData.name],
+          callers: [],
+          xmlOrder: act.xmlOrder,
+          flowOrder: act.flowOrder,
+          diagramX: act.diagramX,
+          diagramY: act.diagramY
+        });
+      });
     }
   }
 
   return {
-    rootProcess,
+    rootProcess: effectiveRoots[0] || null,
+    rootProcesses: effectiveRoots,
+    allDetectedRoots: detectedRoots,
     processCatalog,
     structuredActivities,
+    sharedSubprocesses: sharedSubprocessesList,
     resolvedSubprocesses: Array.from(resolvedSubprocesses),
     missingSubprocesses,
     parsedFilesCount: parsedFiles.length,
@@ -2198,13 +4049,20 @@ window.parseBpmnBatchForPmg = function(fileEntries) {
 };
 
 window.populatePmgAllStepsFromBpmnBatch = function(batchResult) {
-  const root = batchResult.rootProcess;
-  const activities = batchResult.structuredActivities;
+  window.pmgBatchResult = batchResult;
+  window.pmgRootProcesses = batchResult.rootProcesses || [batchResult.rootProcess];
+  window.pmgSharedSubprocesses = batchResult.sharedSubprocesses || [];
 
-  // 1. Update Global State
+  const root = batchResult.rootProcess || (batchResult.rootProcesses && batchResult.rootProcesses[0]) || {};
+  let activities = batchResult.structuredActivities || [];
+
+  // Sort activities by active ordering mode
+  activities = window.sortPmgActivities(activities, window.pmgActivityOrderMode);
+
   window.pmgTempSubprocesses = activities;
   window.pmgActivities = activities.map(a => ({
     id: a.id,
+    uniqueId: a.uniqueId,
     name: a.name,
     type: a.type,
     typeLabel: a.typeLabel,
@@ -2216,25 +4074,39 @@ window.populatePmgAllStepsFromBpmnBatch = function(batchResult) {
     realizationMode: a.realizationMode,
     applicableCase: a.applicableCase,
     comment: a.comment,
+    calledElement: a.calledElement,
+    targetMissing: a.targetMissing,
     parentId: a.parentId,
     level: a.level,
+    rootParentId: a.rootParentId,
+    rootParentName: a.rootParentName,
     parentProcessId: a.parentProcessId,
-    parentProcessName: a.parentProcessName
+    parentProcessName: a.parentProcessName,
+    isSharedSubprocess: a.isSharedSubprocess,
+    sharedParentNames: a.sharedParentNames,
+    callers: a.callers,
+    flowOrder: a.flowOrder,
+    diagramX: a.diagramX,
+    diagramY: a.diagramY,
+    xmlOrder: a.xmlOrder,
+    orderIndex: a.orderIndex
   }));
 
-  // Clean metadata: fill only if found from BPMN, otherwise leave empty
+  const parentNamesTitle = batchResult.rootProcesses.length > 1
+    ? batchResult.rootProcesses.map((r, i) => `P${i + 1}: ${r.name}`).join(' & ')
+    : (root.name || '');
+
   window.pmgProcessDetails = {
     id: root.id || '',
-    name: root.name || '',
-    owner: '', // Clean for user manual fill
+    name: parentNamesTitle || 'Processus Multi-Parents',
+    owner: '',
     exporter: root.exporter ? `${root.exporter} ${root.exporterVersion || ''}`.trim() : '',
     version: root.isExecutable === 'true' ? 'v1.0.0' : '',
-    badges: '',
+    badges: batchResult.rootProcesses.length > 1 ? `Multi-Parents (${batchResult.rootProcesses.length})` : 'CDD / CPE / SGP / SP0',
     defaultFille: '',
-    desc: root.description || ''
+    desc: root.description || `Cartographie multi-processus (${batchResult.rootProcesses.length} parents, ${batchResult.structuredActivities.length} activités).`
   };
 
-  // 2. Populate Step 1 Metadata Inputs
   if (document.getElementById('pmgProcessNameStep')) document.getElementById('pmgProcessNameStep').value = window.pmgProcessDetails.name;
   if (document.getElementById('pmgProcessIdStep')) document.getElementById('pmgProcessIdStep').value = window.pmgProcessDetails.id;
   if (document.getElementById('pmgProcessOwnerStep')) document.getElementById('pmgProcessOwnerStep').value = window.pmgProcessDetails.owner;
@@ -2245,30 +4117,13 @@ window.populatePmgAllStepsFromBpmnBatch = function(batchResult) {
   if (document.getElementById('pmgProcessDescStep')) document.getElementById('pmgProcessDescStep').value = window.pmgProcessDetails.desc;
   window.syncPmgStep1Metadata();
 
-  // 3. Render Step 2 Tree View
-  if (window.renderPmgVisualTree) {
-    window.renderPmgVisualTree(activities);
-  }
+  if (window.renderPmgParentFilterBar) window.renderPmgParentFilterBar();
+  if (window.renderPmgVisualTree) window.renderPmgVisualTree(activities);
+  if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
+  if (window.renderPmgStep3ManualTable) window.renderPmgStep3ManualTable();
+  if (window.renderPmgDataLineageAudit) window.renderPmgDataLineageAudit();
+  if (window.renderPmgStep4ManualTable) window.renderPmgStep4ManualTable();
 
-  // 4. Populate Step 3 Manual Table (Entities & Groups)
-  if (window.renderPmgStep2ManualTable) {
-    window.renderPmgStep2ManualTable();
-  }
-
-  // 5. Populate Step 4 Manual Table (Variables IO & Lineage Audit)
-  if (window.renderPmgStep3ManualTable) {
-    window.renderPmgStep3ManualTable();
-  }
-  if (window.renderPmgDataLineageAudit) {
-    window.renderPmgDataLineageAudit();
-  }
-
-  // 6. Populate Step 5 Manual Table (Modes & Metadata)
-  if (window.renderPmgStep4ManualTable) {
-    window.renderPmgStep4ManualTable();
-  }
-
-  // 7. Enable all 5 Stepper Nodes
   for (let s = 1; s <= 5; s++) {
     const node = document.getElementById('step-node-' + s);
     if (node) {
@@ -2281,19 +4136,10 @@ window.populatePmgAllStepsFromBpmnBatch = function(batchResult) {
   const btnNext1 = document.getElementById('btnPmgStep1Next');
   if (btnNext1) btnNext1.disabled = false;
 
-  // 8. Render All Dynamic Step KPIs
   window.renderAllPmgStepKpis();
-
-  // 9. Render Batch Summary Card
   window.renderPmgBatchSummary(batchResult);
-
-  // 10. Auto-save
   window.savePmgStateToLocalStorage();
 };
-
-// =========================================================================
-// STEP WIZARD KPIS & ANALYTICAL DASHBOARDS
-// =========================================================================
 
 window.renderAllPmgStepKpis = function() {
   window.renderPmgStep1Kpis();
@@ -2348,21 +4194,29 @@ window.renderPmgStep2Kpis = function() {
     return;
   }
 
-  const maxLevel = acts.length > 0 ? Math.max(...acts.map(a => a.level || 1)) : 1;
-  const userTasks = acts.filter(a => (a.type || '').toLowerCase().includes('user')).length;
-  const serviceTasks = acts.filter(a => (a.type || '').toLowerCase().includes('service')).length;
-  const callActs = acts.filter(a => (a.type || '').toLowerCase().includes('call') || (a.type || '').toLowerCase().includes('sous-processus')).length;
+  const filteredActs = typeof window.getPmgFilteredActivities === 'function' ? window.getPmgFilteredActivities() : acts;
+  const maxLevel = filteredActs.length > 0 ? Math.max(...filteredActs.map(a => a.level || 1)) : 1;
+  const userTasks = filteredActs.filter(a => (a.type || '').toLowerCase().includes('user')).length;
+  const serviceTasks = filteredActs.filter(a => (a.type || '').toLowerCase().includes('service') || (a.type || '').toLowerCase().includes('script')).length;
+  const callActs = filteredActs.filter(a => (a.type || '').toLowerCase().includes('call') || (a.type || '').toLowerCase().includes('sous-processus')).length;
+
+  const volumeLabel = filteredActs.length === acts.length 
+    ? `${acts.length}` 
+    : `${filteredActs.length} / ${acts.length}`;
+  const volumeSub = filteredActs.length === acts.length 
+    ? 'Activités & flux extraits' 
+    : `Activités filtrées (${acts.length} au total)`;
 
   container.innerHTML = `
     <div class="pmg-kpi-item">
-      <div class="pmg-kpi-label">Volume Total</div>
-      <div class="pmg-kpi-val" style="color:var(--brand-primary);">${acts.length}</div>
-      <div class="pmg-kpi-sub">Activités &amp; flux extraits</div>
+      <div class="pmg-kpi-label">Volume Affiché &amp; Export</div>
+      <div class="pmg-kpi-val" style="color:var(--brand-primary);">${volumeLabel}</div>
+      <div class="pmg-kpi-sub">${volumeSub}</div>
     </div>
     <div class="pmg-kpi-item">
       <div class="pmg-kpi-label">Profondeur d'Arbre</div>
       <div class="pmg-kpi-val" style="color:${maxLevel > 3 ? '#8b5cf6' : '#009cd7'};">Niveau ${maxLevel}</div>
-      <div class="pmg-kpi-sub">Hiérarchie multiniveau</div>
+      <div class="pmg-kpi-sub">Hiérarchie active</div>
     </div>
     <div class="pmg-kpi-item">
       <div class="pmg-kpi-label">Tâches Humaines (User)</div>
@@ -2372,7 +4226,7 @@ window.renderPmgStep2Kpis = function() {
     <div class="pmg-kpi-item">
       <div class="pmg-kpi-label">Automatisations &amp; Calls</div>
       <div class="pmg-kpi-val" style="color:var(--ok);">${serviceTasks + callActs}</div>
-      <div class="pmg-kpi-sub">${serviceTasks} services, ${callActs} sous-processus</div>
+      <div class="pmg-kpi-sub">${serviceTasks} services/scripts, ${callActs} sous-processus</div>
     </div>
   `;
 };
@@ -2593,13 +4447,13 @@ window.renderPmgBatchSummary = function(batchResult) {
 };
 
 window.loadPmgDemoBpmnSuite = function() {
-  const parentBpmn = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" id="Def_Orchestration" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.14.0">
-  <bpmn:collaboration id="Collaboration_Parent">
+  const parent1Bpmn = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" id="Def_Orchestration" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.14.0">
+  <bpmn:collaboration id="Collaboration_Parent1">
     <bpmn:participant id="Participant_Commerce" name="Direction Commerciale &amp; Ventes" processRef="Process_Orchestration_Commande" />
   </bpmn:collaboration>
-  <bpmn:process id="Process_Orchestration_Commande" name="Orchestration Traitement Commande Client" isExecutable="true">
-    <bpmn:documentation>Processus principal d'orchestration de bout-en-bout pour le traitement et la livraison des commandes clients Bouygues Telecom.</bpmn:documentation>
+  <bpmn:process id="Process_Orchestration_Commande" name="P1 : Orchestration Traitement Commande Client" isExecutable="true">
+    <bpmn:documentation>Processus parent principal d'orchestration pour le traitement et la livraison des commandes clients.</bpmn:documentation>
     <bpmn:laneSet id="LaneSet_1">
       <bpmn:lane id="Lane_Adv" name="Administration des Ventes (ADV)">
         <bpmn:flowNodeRef>Start_Commande</bpmn:flowNodeRef>
@@ -2643,15 +4497,70 @@ window.loadPmgDemoBpmnSuite = function() {
     </bpmn:callActivity>
     <bpmn:endEvent id="End_Commande" name="Commande clôturée avec succès" />
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_P1">
+    <bpmndi:BPMNPlane id="BPMNPlane_P1" bpmnElement="Process_Orchestration_Commande">
+      <bpmndi:BPMNShape id="Start_Commande_di" bpmnElement="Start_Commande"><dc:Bounds x="160" y="100" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Qualifier_Commande_di" bpmnElement="Task_Qualifier_Commande"><dc:Bounds x="260" y="80" width="140" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Call_Validation_Risque_di" bpmnElement="Call_Validation_Risque"><dc:Bounds x="460" y="80" width="140" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Call_Paiement_Facturation_di" bpmnElement="Call_Paiement_Facturation"><dc:Bounds x="660" y="80" width="150" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Call_Expedition_Logistique_di" bpmnElement="Call_Expedition_Logistique"><dc:Bounds x="870" y="80" width="140" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Commande_di" bpmnElement="End_Commande"><dc:Bounds x="1070" y="100" width="36" height="36" /></bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>`;
+
+  const parent2Bpmn = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" id="Def_SAV" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.14.0">
+  <bpmn:collaboration id="Collaboration_SAV">
+    <bpmn:participant id="Participant_SAV" name="Service Après-Vente &amp; Relations Clients" processRef="Process_SAV_Gestion_Retours" />
+  </bpmn:collaboration>
+  <bpmn:process id="Process_SAV_Gestion_Retours" name="P2 : Service Après-Vente &amp; Retours Matériel" isExecutable="true">
+    <bpmn:documentation>Processus parent pour la gestion des demandes de réclamation, retours SAV, avoirs financiers et renvois logistiques.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_SAV">
+      <bpmn:lane id="Lane_ConseillerSAV" name="Conseillers SAV N1/N2">
+        <bpmn:flowNodeRef>Start_SAV</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Enregistrer_Reclamation</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Call_Remboursement_Paiement</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Call_Reexpedition_Colis</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_SAV</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_SAV" name="Demande SAV reçue" />
+    <bpmn:userTask id="Task_Enregistrer_Reclamation" name="Qualifier réclamation et diagnostiquer incident" camunda:candidateGroups="Equipe_SAV">
+      <bpmn:documentation>Diagnostic de l'incident client et détermination du geste commercial ou échange matériel.</bpmn:documentation>
+      <bpmn:extensionElements>
+        <zeebe:ioMapping>
+          <zeebe:input source="= claim_id" target="claimId" />
+          <zeebe:output source="= refund_eligible" target="refundFlag" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+    </bpmn:userTask>
+    <bpmn:callActivity id="Call_Remboursement_Paiement" name="Émettre Remboursement / Avoir" calledElement="Process_Paiement_Facturation">
+      <bpmn:documentation>Appelle le même sous-processus partagé de paiement pour recréditer le compte.</bpmn:documentation>
+    </bpmn:callActivity>
+    <bpmn:callActivity id="Call_Reexpedition_Colis" name="Réexpédier Équipement de Remplacement" calledElement="Process_Expedition_Logistique">
+      <bpmn:documentation>Appelle le même sous-processus partagé de logistique pour expédier le matériel de remplacement.</bpmn:documentation>
+    </bpmn:callActivity>
+    <bpmn:endEvent id="End_SAV" name="Dossier SAV clôturé" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_P2">
+    <bpmndi:BPMNPlane id="BPMNPlane_P2" bpmnElement="Process_SAV_Gestion_Retours">
+      <bpmndi:BPMNShape id="Start_SAV_di" bpmnElement="Start_SAV"><dc:Bounds x="160" y="240" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Enregistrer_Reclamation_di" bpmnElement="Task_Enregistrer_Reclamation"><dc:Bounds x="260" y="220" width="150" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Call_Remboursement_Paiement_di" bpmnElement="Call_Remboursement_Paiement"><dc:Bounds x="470" y="220" width="150" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Call_Reexpedition_Colis_di" bpmnElement="Call_Reexpedition_Colis"><dc:Bounds x="680" y="220" width="150" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_SAV_di" bpmnElement="End_SAV"><dc:Bounds x="890" y="240" width="36" height="36" /></bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>`;
 
   const subRisqueBpmn = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" id="Def_Risque" targetNamespace="http://bpmn.io/schema/bpmn">
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" id="Def_Risque" targetNamespace="http://bpmn.io/schema/bpmn">
   <bpmn:collaboration id="Collaboration_Risque">
     <bpmn:participant id="Participant_Risque" name="Pôle Contrôle &amp; Conformité Risque" processRef="Process_Validation_Risque" />
   </bpmn:collaboration>
-  <bpmn:process id="Process_Validation_Risque" name="Contrôle &amp; Validation Risque Client" isExecutable="true">
-    <bpmn:documentation>Sous-processus d'audit de la solvabilité, scoring prédictif et contrôle des fraudes.</bpmn:documentation>
+  <bpmn:process id="Process_Validation_Risque" name="SP1 : Contrôle &amp; Validation Risque Client" isExecutable="true">
+    <bpmn:documentation>Sous-processus dédié à l'évaluation du score de risque et contrôle anti-fraude.</bpmn:documentation>
     <bpmn:laneSet id="LaneSet_Risque">
       <bpmn:lane id="Lane_ScoringAuto" name="Moteur Automatique IA">
         <bpmn:flowNodeRef>Task_Calcul_Score</bpmn:flowNodeRef>
@@ -2661,52 +4570,54 @@ window.loadPmgDemoBpmnSuite = function() {
       </bpmn:lane>
     </bpmn:laneSet>
     <bpmn:serviceTask id="Task_Calcul_Score" name="Calculer Score Scoring IA">
-      <bpmn:documentation>Appel de l'API de scoring crédit et détection des fraudes bancaires.</bpmn:documentation>
+      <bpmn:documentation>Appel de l'API de scoring crédit et détection des fraudes.</bpmn:documentation>
       <bpmn:extensionElements>
         <zeebe:ioMapping>
           <zeebe:input source="= subOrderId" target="orderId" />
-          <zeebe:input source="= clientSiren" target="companySiren" />
           <zeebe:output source="= calculated_score" target="riskScore" />
-          <zeebe:output source="= fraud_alert_flag" target="fraudAlert" />
         </zeebe:ioMapping>
       </bpmn:extensionElements>
     </bpmn:serviceTask>
     <bpmn:userTask id="Task_Revue_Manuelle_Fraude" name="Audit approfondi du dossier suspect" camunda:candidateGroups="Auditeurs_Fraude">
-      <bpmn:documentation>Revue manuelle effectuée uniquement en cas d'alerte fraude ou score atypique.</bpmn:documentation>
+      <bpmn:documentation>Revue manuelle effectuée uniquement en cas d'alerte fraude.</bpmn:documentation>
       <bpmn:extensionElements>
         <camunda:inputOutput>
-          <camunda:inputParameter name="dossierRisqueId">\${orderId}</camunda:inputParameter>
-          <camunda:outputParameter name="decisionValidation">\${approvedByAuditor}</camunda:outputParameter>
+          <camunda:inputParameter name="dossierRisqueId">${orderId}</camunda:inputParameter>
+          <camunda:outputParameter name="decisionValidation">${approvedByAuditor}</camunda:outputParameter>
         </camunda:inputOutput>
       </bpmn:extensionElements>
     </bpmn:userTask>
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_SP1">
+    <bpmndi:BPMNPlane id="BPMNPlane_SP1" bpmnElement="Process_Validation_Risque">
+      <bpmndi:BPMNShape id="Task_Calcul_Score_di" bpmnElement="Task_Calcul_Score"><dc:Bounds x="200" y="80" width="140" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Revue_Manuelle_Fraude_di" bpmnElement="Task_Revue_Manuelle_Fraude"><dc:Bounds x="380" y="80" width="150" height="80" /></bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>`;
 
   const subPaiementBpmn = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" id="Def_Paiement" targetNamespace="http://bpmn.io/schema/bpmn">
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" id="Def_Paiement" targetNamespace="http://bpmn.io/schema/bpmn">
   <bpmn:collaboration id="Collaboration_Paiement">
     <bpmn:participant id="Participant_Finance" name="Direction Financière &amp; Comptabilité" processRef="Process_Paiement_Facturation" />
   </bpmn:collaboration>
-  <bpmn:process id="Process_Paiement_Facturation" name="Paiement &amp; Émission Facture" isExecutable="true">
-    <bpmn:documentation>Traitement des paiements par carte, prélèvement SEPA et génération de facture certifiée.</bpmn:documentation>
+  <bpmn:process id="Process_Paiement_Facturation" name="SP2 (Partagé) : Paiement, Facturation &amp; Avoirs" isExecutable="true">
+    <bpmn:documentation>Sous-processus transversal partagé (appelé par Commande P1 et SAV P2).</bpmn:documentation>
     <bpmn:laneSet id="LaneSet_Compta">
       <bpmn:lane id="Lane_Passerelle" name="Passerelle Bancaire">
         <bpmn:flowNodeRef>Task_Debiter_Compte</bpmn:flowNodeRef>
         <bpmn:flowNodeRef>Task_Generer_Facture</bpmn:flowNodeRef>
       </bpmn:lane>
     </bpmn:laneSet>
-    <bpmn:serviceTask id="Task_Debiter_Compte" name="Débiter compte bancaire ou CB">
+    <bpmn:serviceTask id="Task_Debiter_Compte" name="Débiter ou recréditer compte bancaire/CB">
       <bpmn:extensionElements>
         <zeebe:ioMapping>
           <zeebe:input source="= paymentOrderId" target="orderId" />
-          <zeebe:input source="= totalAmount" target="amountTTC" />
           <zeebe:output source="= transaction_ref" target="transactionId" />
-          <zeebe:output source="= payment_status" target="paymentStatus" />
         </zeebe:ioMapping>
       </bpmn:extensionElements>
     </bpmn:serviceTask>
-    <bpmn:serviceTask id="Task_Generer_Facture" name="Générer facture PDF certifiée">
+    <bpmn:serviceTask id="Task_Generer_Facture" name="Générer facture ou note d'avoir certifiée">
       <bpmn:extensionElements>
         <zeebe:ioMapping>
           <zeebe:input source="= transactionId" target="txId" />
@@ -2715,15 +4626,21 @@ window.loadPmgDemoBpmnSuite = function() {
       </bpmn:extensionElements>
     </bpmn:serviceTask>
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_SP2">
+    <bpmndi:BPMNPlane id="BPMNPlane_SP2" bpmnElement="Process_Paiement_Facturation">
+      <bpmndi:BPMNShape id="Task_Debiter_Compte_di" bpmnElement="Task_Debiter_Compte"><dc:Bounds x="200" y="80" width="150" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Generer_Facture_di" bpmnElement="Task_Generer_Facture"><dc:Bounds x="390" y="80" width="150" height="80" /></bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>`;
 
   const subShippingBpmn = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" id="Def_Shipping" targetNamespace="http://bpmn.io/schema/bpmn">
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:zeebe="http://camunda.org/schema/1.0/zeebe" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" id="Def_Shipping" targetNamespace="http://bpmn.io/schema/bpmn">
   <bpmn:collaboration id="Collaboration_Logistique">
     <bpmn:participant id="Participant_Logistique" name="Plateforme Logistique &amp; Entrepôt" processRef="Process_Expedition_Logistique" />
   </bpmn:collaboration>
-  <bpmn:process id="Process_Expedition_Logistique" name="Expédition &amp; Livraison Colis" isExecutable="true">
-    <bpmn:documentation>Préparation des colis matériels (box, routeurs, cartes SIM) et remise au transporteur.</bpmn:documentation>
+  <bpmn:process id="Process_Expedition_Logistique" name="SP3 (Partagé) : Expédition &amp; Livraison Colis" isExecutable="true">
+    <bpmn:documentation>Sous-processus transversal partagé pour l'emballage et l'expédition EDI (appelé par P1 et P2).</bpmn:documentation>
     <bpmn:laneSet id="LaneSet_Entrepot">
       <bpmn:lane id="Lane_Preparateurs" name="Opérateurs Entrepôt">
         <bpmn:flowNodeRef>Task_Preparer_Colis</bpmn:flowNodeRef>
@@ -2736,12 +4653,7 @@ window.loadPmgDemoBpmnSuite = function() {
       <bpmn:extensionElements>
         <camunda:formData>
           <camunda:formField id="box_serial_number" type="string" />
-          <camunda:formField id="sim_card_iccid" type="string" />
         </camunda:formData>
-        <camunda:inputOutput>
-          <camunda:inputParameter name="shippingOrderId">\${shippingOrderId}</camunda:inputParameter>
-          <camunda:outputParameter name="colisPoids">\${weightKg}</camunda:outputParameter>
-        </camunda:inputOutput>
       </bpmn:extensionElements>
     </bpmn:userTask>
     <bpmn:serviceTask id="Task_Transmettre_EDI" name="Notifier transporteur et éditer étiquette">
@@ -2749,28 +4661,35 @@ window.loadPmgDemoBpmnSuite = function() {
         <zeebe:ioMapping>
           <zeebe:input source="= shippingOrderId" target="orderId" />
           <zeebe:output source="= carrier_tracking_id" target="trackingNumber" />
-          <zeebe:output source="= estimated_delivery_date" target="deliveryDate" />
         </zeebe:ioMapping>
       </bpmn:extensionElements>
     </bpmn:serviceTask>
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_SP3">
+    <bpmndi:BPMNPlane id="BPMNPlane_SP3" bpmnElement="Process_Expedition_Logistique">
+      <bpmndi:BPMNShape id="Task_Preparer_Colis_di" bpmnElement="Task_Preparer_Colis"><dc:Bounds x="200" y="80" width="150" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Transmettre_EDI_di" bpmnElement="Task_Transmettre_EDI"><dc:Bounds x="390" y="80" width="150" height="80" /></bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>`;
 
   const mockFiles = [
-    { name: '1_Process_Orchestration_Commande.bpmn', content: parentBpmn },
-    { name: '2_Process_Validation_Risque.bpmn', content: subRisqueBpmn },
-    { name: '3_Process_Paiement_Facturation.bpmn', content: subPaiementBpmn },
-    { name: '4_Process_Expedition_Logistique.bpmn', content: subShippingBpmn }
+    { name: '1_Process_P1_Commande.bpmn', content: parent1Bpmn },
+    { name: '2_Process_P2_SAV_Retours.bpmn', content: parent2Bpmn },
+    { name: '3_Process_SP1_Validation_Risque.bpmn', content: subRisqueBpmn },
+    { name: '4_Process_SP2_Paiement_Facturation.bpmn', content: subPaiementBpmn },
+    { name: '5_Process_SP3_Expedition_Logistique.bpmn', content: subShippingBpmn }
   ];
 
-  const fileEntries = mockFiles.map(f => ({ fileName: f.name, content: f.content }));
-  const batchResult = window.parseBpmnBatchForPmg(fileEntries);
+  window.pmgCurrentFileEntries = mockFiles;
+  window.pmgExplicitParents = null; // Auto detect
+  const batchResult = window.parseBpmnBatchForPmg(mockFiles);
   window.populatePmgAllStepsFromBpmnBatch(batchResult);
 
   const uploadTitle = document.getElementById('uploadTitlePmgOneShot');
   const uploadSub = document.getElementById('uploadSubPmgOneShot');
-  if (uploadTitle) uploadTitle.textContent = `✨ Démo Multi-BPMN Bouygues Telecom chargée (4 processus)`;
-  if (uploadSub) uploadSub.textContent = `Processus parent : "Orchestration Traitement Commande Client" (14 activités extraites)`;
+  if (uploadTitle) uploadTitle.textContent = `✨ Démo Multi-Parents & Sous-Processus Partagés chargée (5 processus)`;
+  if (uploadSub) uploadSub.textContent = `2 Parents détectés (P1 Commande, P2 SAV) • 2 Sous-processus Partagés (Paiement, Expédition)`;
 };
 
 let pmgListenersRegistered = false;
@@ -2990,9 +4909,25 @@ function extractPmgActivities(xmlDoc) {
   
   for (let i = 0; i < allElements.length; i++) {
     const el = allElements[i];
-    const localName = el.localName ? el.localName.toLowerCase() : '';
     
-    if (['usertask', 'servicetask', 'manualtask', 'scripttask', 'sendtask', 'receivetask', 'businessruletask', 'task', 'callactivity'].includes(localName)) {
+    // Ignorer les balises techniques d'extension
+    if (el.prefix === 'zeebe' || el.prefix === 'camunda' || el.prefix === 'modeler') continue;
+    let isExt = false;
+    let pNode = el.parentElement;
+    while (pNode && pNode.nodeType === 1) {
+      const pLn = (pNode.localName || '').toLowerCase();
+      if (pLn === 'extensionelements' || pLn === 'extension_elements') {
+        isExt = true;
+        break;
+      }
+      pNode = pNode.parentElement;
+    }
+    if (isExt) continue;
+
+    const rawLocalName = el.localName ? el.localName.toLowerCase() : '';
+    
+    if (['usertask', 'servicetask', 'manualtask', 'scripttask', 'sendtask', 'receivetask', 'businessruletask', 'task', 'callactivity'].includes(rawLocalName)) {
+      const localName = window.detectBpmnElementType(el, rawLocalName);
       const id = el.getAttribute('id') || '';
       const name = el.getAttribute('name') || '';
       
@@ -3364,21 +5299,131 @@ function sortActivitiesHierarchically(acts) {
 }
 
 // Render PMG activities table rows
+
+window.pmgMatrixColFilters = { act: '', type: 'all', entity: 'all', in: '', out: '', case: '', comment: '' };
+
+window.onPmgMatrixColFilterChange = function() {
+  const actInput = document.getElementById('pmgMatrixFilterColAct');
+  const typeSelect = document.getElementById('pmgMatrixFilterColType');
+  const entitySelect = document.getElementById('pmgMatrixFilterColEntity');
+  const inInput = document.getElementById('pmgMatrixFilterColIn');
+  const outInput = document.getElementById('pmgMatrixFilterColOut');
+  const caseInput = document.getElementById('pmgMatrixFilterColCase');
+  const commentInput = document.getElementById('pmgMatrixFilterColComment');
+
+  window.pmgMatrixColFilters.act = (actInput?.value || '').trim().toLowerCase();
+  window.pmgMatrixColFilters.type = typeSelect?.value || 'all';
+  window.pmgMatrixColFilters.entity = entitySelect?.value || 'all';
+  window.pmgMatrixColFilters.in = (inInput?.value || '').trim().toLowerCase();
+  window.pmgMatrixColFilters.out = (outInput?.value || '').trim().toLowerCase();
+  window.pmgMatrixColFilters.case = (caseInput?.value || '').trim().toLowerCase();
+  window.pmgMatrixColFilters.comment = (commentInput?.value || '').trim().toLowerCase();
+
+  if (actInput) actInput.classList.toggle('has-filter', Boolean(window.pmgMatrixColFilters.act));
+  if (typeSelect) typeSelect.classList.toggle('has-filter', window.pmgMatrixColFilters.type !== 'all');
+  if (entitySelect) entitySelect.classList.toggle('has-filter', window.pmgMatrixColFilters.entity !== 'all');
+  if (inInput) inInput.classList.toggle('has-filter', Boolean(window.pmgMatrixColFilters.in));
+  if (outInput) outInput.classList.toggle('has-filter', Boolean(window.pmgMatrixColFilters.out));
+  if (caseInput) caseInput.classList.toggle('has-filter', Boolean(window.pmgMatrixColFilters.case));
+  if (commentInput) commentInput.classList.toggle('has-filter', Boolean(window.pmgMatrixColFilters.comment));
+
+  window.renderPmgMatrix();
+};
+
+window.clearPmgMatrixColFilter = function(field) {
+  const map = {
+    act: 'pmgMatrixFilterColAct',
+    in: 'pmgMatrixFilterColIn',
+    out: 'pmgMatrixFilterColOut',
+    case: 'pmgMatrixFilterColCase',
+    comment: 'pmgMatrixFilterColComment'
+  };
+  const id = map[field];
+  if (id) {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  }
+  window.onPmgMatrixColFilterChange();
+};
+
+window.resetPmgMatrixFilters = function() {
+  pmgSearchQuery = '';
+  pmgTypeFilter = 'all';
+  pmgEntityFilter = 'all';
+  window.pmgMatrixColFilters = { act: '', type: 'all', entity: 'all', in: '', out: '', case: '', comment: '' };
+
+  const sInput = document.getElementById('pmgMatrixSearchInput');
+  const tSel = document.getElementById('pmgTypeFilter');
+  const eSel = document.getElementById('pmgEntityFilter');
+  if (sInput) sInput.value = '';
+  if (tSel) tSel.value = 'all';
+  if (eSel) eSel.value = 'all';
+
+  ['pmgMatrixFilterColAct', 'pmgMatrixFilterColIn', 'pmgMatrixFilterColOut', 'pmgMatrixFilterColCase', 'pmgMatrixFilterColComment'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = ''; el.classList.remove('has-filter'); }
+  });
+  ['pmgMatrixFilterColType', 'pmgMatrixFilterColEntity'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = 'all'; el.classList.remove('has-filter'); }
+  });
+
+  window.renderPmgMatrix();
+};
+
 window.renderPmgMatrix = function() {
   const tbody = document.getElementById('pmgMatrixTableBody');
   const empty = document.getElementById('pmgMatrixEmptyMsg');
   
   if (!tbody) return;
+
+  const activities = window.pmgActivities || [];
+
+  // Populate dynamic selects in matrix column filters
+  const colTypeSelect = document.getElementById('pmgMatrixFilterColType');
+  if (colTypeSelect && activities.length > 0) {
+    const currentVal = window.pmgMatrixColFilters?.type || 'all';
+    const typeMap = new Map();
+    activities.forEach(a => {
+      const k = window.getPmgTypeKey(a.type || a.typeLabel);
+      const l = a.typeLabel || a.type || 'Tâche';
+      typeMap.set(k, { label: l, count: (typeMap.get(k)?.count || 0) + 1 });
+    });
+    let typeOpts = '<option value="all">Tous types (' + activities.length + ')</option>';
+    for (const [k, v] of typeMap.entries()) {
+      typeOpts += '<option value="' + escAttr(k) + '" ' + (k === currentVal ? 'selected' : '') + '>' + escHtml(v.label) + ' (' + v.count + ')</option>';
+    }
+    colTypeSelect.innerHTML = typeOpts;
+  }
+
+  const colEntitySelect = document.getElementById('pmgMatrixFilterColEntity');
+  if (colEntitySelect && activities.length > 0) {
+    const currentVal = window.pmgMatrixColFilters?.entity || 'all';
+    const entityMap = new Map();
+    activities.forEach(a => {
+      const e = (a.entity && a.entity !== 'Non défini') ? a.entity : 'Non défini';
+      entityMap.set(e, (entityMap.get(e) || 0) + 1);
+    });
+    let entOpts = '<option value="all">Toutes entités (' + activities.length + ')</option>';
+    for (const [e, count] of entityMap.entries()) {
+      entOpts += '<option value="' + escAttr(e) + '" ' + (e === currentVal ? 'selected' : '') + '>' + escHtml(e) + ' (' + count + ')</option>';
+    }
+    colEntitySelect.innerHTML = entOpts;
+  }
   
-  const filtered = window.pmgActivities.filter(act => {
+  const cf = window.pmgMatrixColFilters || {};
+  const filtered = activities.filter(act => {
+    // Top bar global search
     if (pmgSearchQuery) {
-      const nameMatch = act.name.toLowerCase().includes(pmgSearchQuery);
-      const idMatch = act.id.toLowerCase().includes(pmgSearchQuery);
+      const nameMatch = (act.name || '').toLowerCase().includes(pmgSearchQuery);
+      const idMatch = (act.id || '').toLowerCase().includes(pmgSearchQuery);
       const caseMatch = (act.applicableCase || '').toLowerCase().includes(pmgSearchQuery);
       const commentMatch = (act.comment || '').toLowerCase().includes(pmgSearchQuery);
-      if (!nameMatch && !idMatch && !caseMatch && !commentMatch) return false;
+      const parentMatch = (act.parentProcessName || act.rootParentName || '').toLowerCase().includes(pmgSearchQuery);
+      if (!nameMatch && !idMatch && !caseMatch && !commentMatch && !parentMatch) return false;
     }
     
+    // Top bar Type & Entity filters
     if (pmgTypeFilter !== 'all') {
       if (pmgTypeFilter === 'other') {
         if (['usertask', 'servicetask', 'manualtask', 'scripttask', 'callactivity'].includes(act.type)) return false;
@@ -3390,13 +5435,61 @@ window.renderPmgMatrix = function() {
     if (pmgEntityFilter !== 'all') {
       if (act.entity !== pmgEntityFilter) return false;
     }
+
+    if (window.pmgParentFilter && window.pmgParentFilter !== 'all') {
+      if (window.pmgParentFilter === 'shared_only') {
+        if (!act.isSharedSubprocess) return false;
+      } else {
+        if (act.rootParentId !== window.pmgParentFilter && act.parentProcessId !== window.pmgParentFilter) return false;
+      }
+    }
+
+    // Column-level filters
+    if (cf.act) {
+      const name = (act.name || '').toLowerCase();
+      const id = (act.id || '').toLowerCase();
+      const parent = (act.parentProcessName || act.rootParentName || '').toLowerCase();
+      if (!name.includes(cf.act) && !id.includes(cf.act) && !parent.includes(cf.act)) return false;
+    }
+
+    if (cf.type && cf.type !== 'all') {
+      const k = window.getPmgTypeKey(act.type || act.typeLabel);
+      if (k !== cf.type) return false;
+    }
+
+    if (cf.entity && cf.entity !== 'all') {
+      const ent = (act.entity && act.entity !== 'Non défini') ? act.entity : 'Non défini';
+      if (ent !== cf.entity) return false;
+    }
+
+    if (cf.in) {
+      const ins = (act.inputs || []).map(i => String(i).toLowerCase());
+      if (!ins.some(v => v.includes(cf.in))) return false;
+    }
+
+    if (cf.out) {
+      const outs = (act.outputs || []).map(o => String(o).toLowerCase());
+      if (!outs.some(v => v.includes(cf.out))) return false;
+    }
+
+    if (cf.case) {
+      const c = (act.applicableCase || '').toLowerCase();
+      if (!c.includes(cf.case)) return false;
+    }
+
+    if (cf.comment) {
+      const c = (act.comment || '').toLowerCase();
+      if (!c.includes(cf.comment)) return false;
+    }
     
     return true;
   });
   
   const countHint = document.getElementById('pmgMatrixRowCount');
   if (countHint) {
-    countHint.textContent = `${filtered.length} activités affichées / ${window.pmgActivities.length} totales`;
+    const activeOrderObj = window.PMG_ORDER_MODES[window.pmgActivityOrderMode || 'flow'];
+    const orderLabel = activeOrderObj ? activeOrderObj.label : 'Flux';
+    countHint.innerHTML = '<strong>' + filtered.length + '</strong> / ' + activities.length + ' activités affichées • Ordre actif : <span style="color:var(--brand-primary); font-weight:700;">' + orderLabel + '</span>';
   }
   
   if (filtered.length === 0) {
@@ -3407,55 +5500,70 @@ window.renderPmgMatrix = function() {
   
   if (empty) empty.style.display = 'none';
   
-  const sorted = sortActivitiesHierarchically(filtered);
+  const sorted = window.sortPmgActivities(filtered, window.pmgActivityOrderMode);
   
-  tbody.innerHTML = sorted.map(act => {
-    const inputsHtml = act.inputs.length > 0 
-      ? `<div class="pmg-io-container">${act.inputs.map(i => `<span class="badge-io badge-io-in" title="${esc(i)}">${esc(i)}</span>`).join('')}</div>` 
+  tbody.innerHTML = sorted.map((act, idx) => {
+    const inputsHtml = (act.inputs || []).length > 0 
+      ? '<div class="pmg-io-container">' + act.inputs.map(i => '<span class="badge-io badge-io-in" title="' + esc(i) + '">' + esc(i) + '</span>').join('') + '</div>' 
       : '<span style="color:var(--text-tertiary);font-size:11px;font-style:italic;">Aucune entrée</span>';
       
-    const outputsHtml = act.outputs.length > 0 
-      ? `<div class="pmg-io-container">${act.outputs.map(o => `<span class="badge-io badge-io-out" title="${esc(o)}">${esc(o)}</span>`).join('')}</div>` 
+    const outputsHtml = (act.outputs || []).length > 0 
+      ? '<div class="pmg-io-container">' + act.outputs.map(o => '<span class="badge-io badge-io-out" title="' + esc(o) + '">' + esc(o) + '</span>').join('') + '</div>' 
       : '<span style="color:var(--text-tertiary);font-size:11px;font-style:italic;">Aucune sortie</span>';
       
     let badgeClass = 'type-task';
-    if (act.type === 'callactivity') badgeClass = 'type-subprocess';
+    if (act.type === 'callactivity' || (act.typeLabel && act.typeLabel.toLowerCase().includes('sous-processus'))) badgeClass = 'type-subprocess';
     
-    const indent = (act.level && act.level > 1) ? (act.level - 1) * 20 : 0;
-    const arrow = indent > 0 ? '<span style="color:var(--text-tertiary);margin-right:6px;font-family:sans-serif;">↳</span>' : '';
+    const indent = (act.level && act.level > 1) ? (act.level - 1) * 18 : 0;
+    const arrow = indent > 0 ? '<span style="color:var(--brand-primary);margin-right:4px;font-family:sans-serif;">↳</span>' : '';
+    const parentName = act.parentProcessName || act.rootParentName || 'Parent';
+
+    let sharedHtml = '';
+    if (act.isSharedSubprocess) {
+      const pList = (act.sharedParentNames || []).join(', ') || 'Multi-parents';
+      sharedHtml = '<span class="pmg-shared-pill" style="margin-left:6px;" title="Sous-processus transversal appelé par : ' + esc(pList) + '">🔗 Partagé (' + esc(pList) + ')</span>';
+    }
+
+    const groupVal = (typeof window.cleanPmgUserGroupName === 'function') ? window.cleanPmgUserGroupName(act.userGroup) : (act.userGroup || '');
+    const groupBadge = groupVal ? '<div style="font-size:10px; color:var(--text-tertiary); margin-top:2px;">👤 <code>' + esc(groupVal) + '</code></div>' : '';
     
     return `
       <tr>
         <td style="padding-left: ${indent + 8}px;">
-          ${arrow}
-          <strong style="color:var(--text-primary); font-weight:600;">${esc(act.name)}</strong>
-          ${act.parentId ? `<span style="font-size:10px;color:var(--text-tertiary);margin-left:8px;">(Parent: ${esc(act.parentId)})</span>` : ''}
-          <br>
-          <span class="mono" style="font-size:10px;color:var(--text-tertiary);">${act.id}</span>
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:2px;">
+            <span class="pmg-order-pill" title="Index séquentiel ${window.pmgActivityOrderMode}">#${act.orderIndex || (idx + 1)}</span>
+            ${arrow}
+            <strong style="color:var(--text-primary); font-weight:600; font-size:12.5px;">${esc(act.name)}</strong>
+            <span class="pmg-parent-badge">🏛️ ${esc(parentName)}</span>
+            ${sharedHtml}
+          </div>
+          <div class="mono" style="font-size:10px;color:var(--text-tertiary); padding-left:${indent > 0 ? 18 : 0}px;">id: ${act.id}</div>
         </td>
         <td>
-          <span class="badge-bpmn ${badgeClass}">${act.typeLabel}</span>
+          <span class="badge-bpmn ${badgeClass}">${esc(act.typeLabel || act.type)}</span>
         </td>
         <td>
-          <span class="badge badge-process" style="padding: 4px 8px; border-radius: 4px;">${esc(act.entity)}</span>
+          <span class="badge badge-process" style="padding: 4px 8px; border-radius: 4px;">${esc(act.entity || 'Non défini')}</span>
+          ${groupBadge}
         </td>
         <td>${inputsHtml}</td>
         <td>${outputsHtml}</td>
-        <td>
-          <textarea class="pmg-input pmg-case" data-id="${act.id}" oninput="savePmgDetails()" placeholder="Ex: Si le client est majeur...">${esc(act.applicableCase || '')}</textarea>
-        </td>
-        <td>
-          <textarea class="pmg-input pmg-comment" data-id="${act.id}" oninput="savePmgDetails()" placeholder="Ex: Cette étape nécessite validation...">${esc(act.comment || '')}</textarea>
+        <td>${esc(act.applicableCase || '—')}</td>
+        <td style="max-width: 250px; font-size: 11.5px; color: var(--text-secondary); line-height: 1.4;">
+          ${esc(act.comment || '—')}
         </td>
       </tr>
     `;
   }).join('');
 };
 
-// Exports
 window.exportPmgCSV = function() {
-  if (!window.pmgActivities || window.pmgActivities.length === 0) {
-    alert("La matrice PMG est vide.");
+  const activitiesToExport = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || []);
+
+  if (!activitiesToExport || activitiesToExport.length === 0) {
+    alert("Aucune activité ne correspond aux filtres de types sélectionnés.");
     return;
   }
   
@@ -3470,56 +5578,92 @@ window.exportPmgCSV = function() {
   
   csv += 'Activité (Technique ID),Type de composant,Entité réalisatrice,Inputs (Entrées),Outputs (Sorties),Applicable dans quel cas ?,Commentaire\n';
   
-  window.pmgActivities.forEach(act => {
+  activitiesToExport.forEach(act => {
     const caseVal = document.querySelector(`.pmg-case[data-id="${act.id}"]`)?.value || act.applicableCase || '';
     const commentVal = document.querySelector(`.pmg-comment[data-id="${act.id}"]`)?.value || act.comment || '';
     
     csv += [
       qq(`${act.name} (${act.id})`),
-      qq(act.typeLabel),
+      qq(act.typeLabel || act.type),
       qq(act.entity),
-      qq(act.inputs.join('; ')),
-      qq(act.outputs.join('; ')),
+      qq((act.inputs || []).join('; ')),
+      qq((act.outputs || []).join('; ')),
       qq(caseVal),
       qq(commentVal)
     ].join(',') + '\n';
   });
   
-  dl(csv, `pmg_matrice_${window.pmgProcessDetails.id || 'process'}.csv`, 'text/csv');
+  dl(csv, `pmg_matrice_${window.pmgProcessDetails?.id || 'process'}.csv`, 'text/csv');
 };
 
 window.exportPmgExcel = function() {
-  if (!window.pmgActivities || window.pmgActivities.length === 0) {
-    alert("La matrice PMG est vide.");
+  const allActs = window.pmgActivities || window.pmgTempSubprocesses || [];
+  if (!allActs || allActs.length === 0) {
+    alert("La matrice PMG est vide. Veuillez charger des processus BPMN.");
     return;
   }
 
-  const processName = document.getElementById('pmgProcessNameStep')?.value || document.getElementById('pmgProcessName')?.value || 'Lancement projet';
-  const processId = document.getElementById('pmgProcessIdStep')?.value || document.getElementById('pmgProcessId')?.value || 'lancement-projet';
+  const activitiesToExport = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : allActs;
+
+  if (!activitiesToExport || activitiesToExport.length === 0) {
+    alert("Aucune activité ne correspond aux filtres de types sélectionnés.");
+    return;
+  }
+
+  // Helper to clean variable names
+  function cleanVarName(v) {
+    if (!v) return '';
+    let s = String(v).trim();
+    if (s.startsWith('=')) s = s.substring(1).trim();
+    const idx = s.indexOf('(');
+    if (idx !== -1) s = s.substring(0, idx).trim();
+    if (s.includes('=')) s = s.split('=')[0].trim();
+    if (s.includes(':')) s = s.split(':')[0].trim();
+    s = s.replace(/^[="'\[]+|[="'\]]+$/g, '').trim();
+    return s;
+  }
+
+  // 1. Process Metadata & Roots
+  const batch = window.pmgBatchResult;
+  const roots = (batch && batch.rootProcesses && batch.rootProcesses.length > 0)
+    ? batch.rootProcesses
+    : [{ id: 'P1', name: document.getElementById('pmgProcessNameStep')?.value || document.getElementById('pmgProcessName')?.value || 'Processus Principal' }];
+
+  let rootTitles = roots.map((r, i) => `P${i + 1}: ${r.name || r.id}`).join(' & ');
+  if (!rootTitles) rootTitles = document.getElementById('pmgProcessNameStep')?.value || 'Matrice PMG';
+
+  const processId = document.getElementById('pmgProcessIdStep')?.value || document.getElementById('pmgProcessId')?.value || 'matrice_pmg';
   const owner = document.getElementById('pmgProcessOwnerStep')?.value || document.getElementById('pmgProcessOwner')?.value || 'Direction Métier';
-  const exporter = document.getElementById('pmgExporterStep')?.value || document.getElementById('pmgExporter')?.value || 'Équipe PMG / Modélisateur';
+  const exporter = document.getElementById('pmgExporterStep')?.value || document.getElementById('pmgExporter')?.value || 'Équipe PMG';
   const badges = document.getElementById('pmgProjectBadgesStep')?.value || 'CDD / CPE / SGP / SP0 / DMN';
-  const defaultFille = document.getElementById('pmgDefaultProcessFilleStep')?.value || 'NA';
 
-  // 1. Sort activities strictly hierarchically (Root -> Children)
-  const sortedActivities = sortActivitiesHierarchically(window.pmgActivities);
+  // 2. Sort activities strictly by DAG flow or hierarchy
+  const sortedActivities = window.sortPmgActivities(activitiesToExport, window.pmgActivityOrderMode || 'flow');
 
-  // Map activities by ID and Name for fast ancestor chain lookup
-  const nodeMap = new Map();
+  // Map activities by uniqueId, id, and name for hierarchical ancestor traversal
+  const nodeMapByUniqueId = new Map();
+  const nodeMapById = new Map();
+  const nodeMapByName = new Map();
+
   sortedActivities.forEach(act => {
-    if (act.id) nodeMap.set(String(act.id).toLowerCase(), act);
-    if (act.name) nodeMap.set(String(act.name).toLowerCase(), act);
+    if (act.uniqueId) nodeMapByUniqueId.set(act.uniqueId, act);
+    if (act.id) nodeMapById.set(act.id, act);
+    if (act.name) nodeMapByName.set(act.name, act);
   });
 
   const getAncestors = (act) => {
     const chain = [];
-    let curr = act;
-    const visited = new Set();
-    while (curr && !visited.has(curr.id || curr.name)) {
-      visited.add(curr.id || curr.name);
-      chain.unshift(curr);
-      if (curr.parentId) {
-        curr = nodeMap.get(String(curr.parentId).toLowerCase());
+    let currParentId = act.parentId;
+    const visited = new Set([act.uniqueId || act.id]);
+
+    while (currParentId) {
+      const parentNode = nodeMapByUniqueId.get(currParentId) || nodeMapById.get(currParentId) || nodeMapByName.get(currParentId);
+      if (parentNode && !visited.has(parentNode.uniqueId || parentNode.id)) {
+        visited.add(parentNode.uniqueId || parentNode.id);
+        chain.unshift(parentNode);
+        currParentId = parentNode.parentId;
       } else {
         break;
       }
@@ -3527,136 +5671,148 @@ window.exportPmgExcel = function() {
     return chain;
   };
 
-  // 2. Process activities into structured table rows
-  const rawRows = sortedActivities.map(act => {
-    const chain = getAncestors(act);
-    const caseVal = document.querySelector(`.pmg-case[data-id="${act.id}"]`)?.value || act.applicableCase || '';
-    const commentVal = document.querySelector(`.pmg-comment[data-id="${act.id}"]`)?.value || act.comment || '';
-    const isSub = act.type === 'callactivity' || (act.typeLabel && act.typeLabel.toLowerCase().includes('sous-processus'));
+  // 3. Strict Multi-Level Hierarchy Construction (N0, N1, N2, N3, N4) & Variable Rows Extraction
+  const actBlocks = sortedActivities.map(act => {
+    const parents = getAncestors(act);
+    const caseVal = act.applicableCase || '';
+    const commentVal = act.comment || '';
 
-    let colL1 = "NA", colL2 = "NA", colL3 = "NA", colL4 = "NA", colL5 = "NA", colL6 = "NA", colTask = "NA";
+    let colN0 = act.rootParentName || roots[0].name || 'Processus Principal';
+    let colN1 = "NA", colN2 = "NA", colN3 = "NA", colN4 = "NA";
 
-    if (chain.length >= 1) colL1 = chain[0].name;
-    if (chain.length >= 2) colL2 = chain[1].name;
-    if (chain.length >= 3) colL3 = chain[2].name;
-    if (chain.length >= 4) colL4 = chain[3].name;
-    if (chain.length >= 5) colL5 = chain[4].name;
-    if (chain.length >= 6) colL6 = chain[5].name;
-    if (chain.length >= 7) {
-      colTask = chain.slice(6).map(c => c.name).join(' / ');
+    if (parents.length === 0) {
+      if (act.level === 2 && act.parentProcessName && act.parentProcessName !== colN0) {
+        colN1 = act.parentProcessName;
+        colN2 = act.name;
+      } else if (act.level >= 3 && act.parentProcessName && act.parentProcessName !== colN0) {
+        colN1 = act.parentProcessName;
+        colN2 = act.parentProcessName;
+        colN3 = act.name;
+      } else {
+        colN1 = act.name;
+      }
+    } else if (parents.length === 1) {
+      colN1 = parents[0].name;
+      colN2 = act.name;
+    } else if (parents.length === 2) {
+      colN1 = parents[0].name;
+      colN2 = parents[1].name;
+      colN3 = act.name;
+    } else if (parents.length === 3) {
+      colN1 = parents[0].name;
+      colN2 = parents[1].name;
+      colN3 = parents[2].name;
+      colN4 = act.name;
+    } else {
+      colN1 = parents[0].name;
+      colN2 = parents[1].name;
+      colN3 = parents[2].name;
+      colN4 = parents.slice(3).map(p => p.name).concat([act.name]).join(' / ');
     }
 
-    if (act.level === 1 && colL1 === "NA") colL1 = act.name;
+    const cleanGroup = (typeof window.cleanPmgUserGroupName === 'function')
+      ? window.cleanPmgUserGroupName(act.userGroup)
+      : (act.userGroup || '');
+
+    const parentProcLabel = act.parentProcessName || act.rootParentName || roots[0].name || 'VDR';
+
+    let modeLabel = act.realizationMode || ((act.type || '').toLowerCase().includes('call') ? 'Call Activity' : 'Manuelle');
+    if ((act.type || '').toLowerCase().includes('service')) modeLabel = 'Automatique (Service)';
+
+    // Extract individual clean variables list for Inputs and Outputs
+    const rawInputs = (act.inputs || []).map(cleanVarName).filter(v => v && v !== 'NA');
+    const rawOutputs = (act.outputs || []).map(cleanVarName).filter(v => v && v !== 'NA');
+
+    // Deduplicate while keeping order
+    const inList = Array.from(new Set(rawInputs));
+    const outList = Array.from(new Set(rawOutputs));
+
+    // Each variable gets its own Excel table row!
+    const rowCount = Math.max(inList.length, outList.length, 1);
 
     return {
-      chainLength: chain.length,
-      colL1,
-      colL2,
-      colL3,
-      colL4,
-      colL5,
-      colL6,
-      colTask,
-      act,
-      entity: act.entity || 'Non défini',
-      userGroup: act.userGroup || '',
-      inputs: (act.inputs || []).join('\n'),
-      outputs: (act.outputs || []).join('\n'),
-      mode: act.realizationMode || (isSub ? 'Call Activity' : 'Manuelle'),
-      applicableCase: caseVal,
-      processFille: isSub ? (act.id || defaultFille) : defaultFille,
-      comment: commentVal
+      colN0: colN0 || "NA",
+      colN1: colN1 || "NA",
+      colN2: colN2 || "NA",
+      colN3: colN3 || "NA",
+      colN4: colN4 || "NA",
+      entity: (act.entity && act.entity !== 'Non défini') ? act.entity : 'NA',
+      userGroup: cleanGroup || 'NA',
+      inList,
+      outList,
+      rowCount,
+      mode: modeLabel,
+      applicableCase: caseVal || 'NA',
+      parentProcess: parentProcLabel,
+      comment: commentVal || '—',
+      act
     };
   });
 
-  // 3. Dynamically determine which hierarchy columns have data
-  const hasL1 = rawRows.some(r => r.colL1 !== "NA");
-  const hasL2 = rawRows.some(r => r.colL2 !== "NA");
-  const hasL3 = rawRows.some(r => r.colL3 !== "NA");
-  const hasL4 = rawRows.some(r => r.colL4 !== "NA");
-  const hasL5 = rawRows.some(r => r.colL5 !== "NA");
-  const hasL6 = rawRows.some(r => r.colL6 !== "NA");
+  // 4. Compute Merged Spans for N0, N1, N2, N3 accounting for variable sub-rows
+  const numActs = actBlocks.length;
+  const spans = Array.from({ length: numActs }, () => ({}));
+  const levelKeys = ['colN0', 'colN1', 'colN2', 'colN3'];
 
-  let maxActiveLvl = 1;
-  if (hasL6) maxActiveLvl = 6;
-  else if (hasL5) maxActiveLvl = 5;
-  else if (hasL4) maxActiveLvl = 4;
-  else if (hasL3) maxActiveLvl = 3;
-  else if (hasL2) maxActiveLvl = 2;
+  levelKeys.forEach((key, keyIdx) => {
+    const parentKeys = levelKeys.slice(0, keyIdx);
 
-  const levelDefs = [
-    { key: 'colL1', title: 'Briques Primaires', sub: 'Niveau : N0', show: hasL1 },
-    { key: 'colL2', title: 'Processus Métier Macro', sub: 'Niveau : N1', show: hasL2 },
-    { key: 'colL3', title: 'Sous-Processus Métier', sub: 'Niveau : N2', show: hasL3 },
-    { key: 'colL4', title: 'Sous-Processus Métier', sub: 'Niveau : N3', show: hasL4 },
-    { key: 'colL5', title: 'Sous-Processus Métier', sub: 'Niveau : N4', show: hasL5 },
-    { key: 'colL6', title: 'Sous-Processus Métier', sub: 'Niveau : N5', show: hasL6 }
-  ].filter((def, idx) => idx < maxActiveLvl);
+    for (let i = 0; i < numActs; i++) {
+      if (spans[i]['show_' + key] === false) continue;
 
-  const processedRows = rawRows.map(r => {
-    let taskName = r.colTask;
-    if (taskName === "NA" && r.chainLength > maxActiveLvl) {
-      taskName = r.act.name;
-    }
-    return {
-      ...r,
-      colTask: taskName
-    };
-  });
+      let mergedRowCount = actBlocks[i].rowCount;
+      const val = actBlocks[i][key];
 
-  // 4. Compute rowspans only for active hierarchy columns
-  const numRows = processedRows.length;
-  const spans = Array.from({ length: numRows }, () => ({}));
-
-  levelDefs.forEach((def, defIdx) => {
-    const key = def.key;
-    const parentKeys = levelDefs.slice(0, defIdx).map(d => d.key);
-
-    for (let r = 0; r < numRows; r++) {
-      if (spans[r]['show_' + key] === false) continue;
-
-      let count = 1;
-      const val = processedRows[r][key];
-
-      while (r + count < numRows) {
-        let sameParent = true;
-        for (const pKey of parentKeys) {
-          if (processedRows[r + count][pKey] !== processedRows[r][pKey]) {
-            sameParent = false;
+      if (val !== "NA") {
+        for (let j = i + 1; j < numActs; j++) {
+          let sameParent = true;
+          for (const pKey of parentKeys) {
+            if (actBlocks[j][pKey] !== actBlocks[i][pKey]) {
+              sameParent = false;
+              break;
+            }
+          }
+          if (sameParent && actBlocks[j][key] === val) {
+            spans[j]['show_' + key] = false;
+            mergedRowCount += actBlocks[j].rowCount;
+          } else {
             break;
           }
         }
-        if (sameParent && processedRows[r + count][key] === val) {
-          spans[r + count]['show_' + key] = false;
-          count++;
-        } else {
-          break;
-        }
       }
-      spans[r]['span_' + key] = count;
-      spans[r]['show_' + key] = true;
+
+      spans[i]['span_' + key] = mergedRowCount;
+      spans[i]['show_' + key] = true;
     }
   });
 
-  const bgColors = ['#FFC000', '#A9D08E', '#BDD7EE', '#FCE4D6', '#E2EFDA'];
-  let l1ColorIdx = 0;
+  // Total Excel table data rows
+  const totalExcelDataRows = actBlocks.reduce((sum, a) => sum + a.rowCount, 0);
 
-  const totalCols = levelDefs.length + 1 + 8; // Level cols + Task col + 8 standard cols
-  const colPart1 = Math.max(2, Math.floor(totalCols * 0.2));
-  const colPart2 = 4;
-  const colPart3 = 4;
-  const colPart4 = totalCols - colPart1 - colPart2 - colPart3;
-
-  let headersHtml = '';
-  levelDefs.forEach(def => {
-    headersHtml += `<th><u>${def.title}</u><br><span style="font-weight:normal; font-size:8.5pt; color:#5B9BD5;">${def.sub}</span></th>`;
+  // N0 Vibrant Distinct Background Colors
+  const n0Palette = ['#FFC000', '#92D050', '#00B0F0', '#FCE4D6', '#E2EFDA', '#D9E1F2', '#FFF2CC'];
+  const n0ColorMap = new Map();
+  let colorIdx = 0;
+  actBlocks.forEach(r => {
+    if (!n0ColorMap.has(r.colN0)) {
+      n0ColorMap.set(r.colN0, n0Palette[colorIdx % n0Palette.length]);
+      colorIdx++;
+    }
   });
-  headersHtml += `<th><u>Tâche N${maxActiveLvl}</u><br><span style="font-weight:normal; font-size:8.5pt; color:#FFC000;">(Activité Finale)</span></th>`;
 
-  // Build HTML Table Excel Format matching dynamic active levels
+  // Unique Slicer elements for header cards
+  const uniqueN1 = Array.from(new Set(actBlocks.map(r => r.colN1).filter(v => v !== 'NA')));
+  const uniqueN2 = Array.from(new Set(actBlocks.map(r => r.colN2).filter(v => v !== 'NA')));
+  const uniqueEntities = Array.from(new Set(actBlocks.map(r => r.entity).filter(v => v !== 'NA')));
+
+  let slicerN1Html = uniqueN1.slice(0, 6).map(n => `<div style="background:#548235; color:#fff; padding:2px 6px; margin-bottom:2px; font-size:7.5pt; border-radius:3px; font-weight:600;">${escHtml(n)}</div>`).join('');
+  let slicerN2Html = uniqueN2.slice(0, 6).map(n => `<div style="background:#ED7D31; color:#fff; padding:2px 6px; margin-bottom:2px; font-size:7.5pt; border-radius:3px; font-weight:600;">${escHtml(n)}</div>`).join('');
+  let slicerEntHtml = uniqueEntities.slice(0, 5).map(e => `<div style="background:#2E75B6; color:#fff; padding:2px 6px; margin-bottom:2px; font-size:7.5pt; border-radius:3px; font-weight:600;">${escHtml(e)}</div>`).join('');
+
+  // 5. Construct Refined Excel Table XML/HTML
   let html = `
-  <html xmlns:o="urn:schemas-microsoft-microsoft-com:office:office"
-        xmlns:x="urn:schemas-microsoft-microsoft-com:office:excel"
+  <html xmlns:o="urn:schemas-microsoft-com:office:office"
+        xmlns:x="urn:schemas-microsoft-com:office:excel"
         xmlns="http://www.w3.org/TR/REC-html40">
   <head>
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
@@ -3665,85 +5821,214 @@ window.exportPmgExcel = function() {
    <x:ExcelWorkbook>
     <x:ExcelWorksheets>
      <x:ExcelWorksheet>
-      <x:Name>Matrice PMG</x:Name>
+      <x:Name>PMG Matrice</x:Name>
       <x:WorksheetOptions>
        <x:DisplayGridlines/>
+       <x:FreezePanes/>
+       <x:FrozenNoSplit/>
+       <x:SplitHorizontal>3</x:SplitHorizontal>
+       <x:TopRowBottomPane>3</x:TopRowBottomPane>
+       <x:AutoFilter x:Range="R3C1:R${totalExcelDataRows + 3}C13" xmlns="urn:schemas-microsoft-com:office:excel"/>
       </x:WorksheetOptions>
+      <x:AutoFilter x:Range="R3C1:R${totalExcelDataRows + 3}C13" xmlns="urn:schemas-microsoft-com:office:excel"/>
      </x:ExcelWorksheet>
     </x:ExcelWorksheets>
    </x:ExcelWorkbook>
   </xml>
   <![endif]-->
   <style>
-    table { border-collapse: collapse; width: 100%; font-family: Calibri, Arial, sans-serif; }
-    th { background-color: #002060; color: #FFFFFF; font-size: 10pt; font-weight: bold; text-align: center; border: 1px solid #000000; padding: 8px; vertical-align: middle; }
-    td { font-size: 9.5pt; border: 1px solid #D9D9D9; padding: 6px; vertical-align: middle; mso-number-format:'\\@'; white-space: pre-line; }
-    .kpi-title { background-color: #FFC000; font-weight: bold; font-size: 11pt; padding: 6px; border: 1px solid #000; text-align: center; }
-    .kpi-box { background-color: #548235; color: #fff; font-weight: bold; text-align: center; padding: 6px; }
+    body { font-family: Calibri, 'Segoe UI', Arial, sans-serif; font-size: 9.5pt; color: #1E293B; }
+    table { border-collapse: collapse; width: 100%; table-layout: auto; }
+    th { background-color: #002060; color: #FFFFFF; font-size: 9.5pt; font-weight: bold; text-align: center; border: 1px solid #001233; padding: 10px 8px; vertical-align: middle; white-space: normal; line-height: 1.3; }
+    td { font-size: 9pt; border: 1px solid #D9D9D9; padding: 6px 8px; vertical-align: middle; mso-number-format:'\\@'; }
+    .cell-na { background-color: #F8FAFC !important; color: #94A3B8 !important; font-style: italic !important; text-align: center !important; font-weight: normal !important; }
+    .cell-empty { color: #CBD5E1 !important; text-align: center !important; }
+    .title-banner { background-color: #FFC000; color: #000000; font-size: 13pt; font-weight: 900; text-align: center; border: 2px solid #000000; padding: 14px 10px; }
+    .slicer-card { background-color: #FFFFFF; border: 1px solid #CBD5E1; vertical-align: top; padding: 5px; font-size: 8pt; }
+    .slicer-header { font-weight: bold; text-align: center; padding: 3px 4px; margin-bottom: 4px; border-bottom: 1px solid #E2E8F0; font-size: 8pt; border-radius: 2px; }
+    .info-box { background-color: #548235; color: #FFFFFF; font-weight: bold; text-align: center; padding: 8px 6px; font-size: 9pt; border: 1px solid #000; }
   </style>
   </head>
   <body>
     <table>
-      <!-- Top Banner Header Rows -->
+      <!-- Row 1: Big Yellow Header Title Block (Modèle Bouygues PMG) -->
       <tr>
-        <td class="kpi-title" colspan="${colPart1}">${escHtml(sanitizeFormula(processName))}</td>
-        <td colspan="${colPart2}" style="background:#548235; color:#fff; font-weight:bold; text-align:center;">${escHtml(sanitizeFormula(badges))}</td>
-        <td colspan="${colPart3}" class="kpi-box">Pilotage / Avancement</td>
-        <td colspan="${colPart4}" style="background:#FFC000; font-weight:bold; text-align:center;">${escHtml(sanitizeFormula(owner))} | ${escHtml(sanitizeFormula(exporter))}</td>
+        <td colspan="5" class="title-banner">
+          ${escHtml(sanitizeFormula(rootTitles))}
+        </td>
+        <td colspan="2" class="slicer-card">
+          <div class="slicer-header" style="background:#E2EFDA; color:#385723;">Processus Métier Macro - Niveau N1</div>
+          ${slicerN1Html || '<div style="color:#888; text-align:center;">Niveau N1</div>'}
+        </td>
+        <td colspan="2" class="slicer-card">
+          <div class="slicer-header" style="background:#FCE4D6; color:#C65911;">Sous-Processus Métier - Niveau N2</div>
+          ${slicerN2Html || '<div style="color:#888; text-align:center;">Niveau N2</div>'}
+        </td>
+        <td colspan="1" class="slicer-card">
+          <div class="slicer-header" style="background:#D9E1F2; color:#1F4E78;">Entités</div>
+          ${slicerEntHtml || '<div style="color:#888; text-align:center;">Toutes</div>'}
+        </td>
+        <td colspan="2" class="info-box">
+          PILOTAGE / AVANCEMENT :<br>
+          <span style="font-size:8pt; font-weight:normal; opacity:0.95;">${escHtml(sanitizeFormula(owner))} &bull; ${escHtml(sanitizeFormula(exporter))}</span>
+        </td>
+        <td colspan="1" style="background:#FFC000; color:#000; font-weight:bold; font-size:8.5pt; text-align:center; border:1px solid #000; padding:6px;">
+          CODE / BADGES :<br><strong>${escHtml(sanitizeFormula(badges))}</strong>
+        </td>
       </tr>
-      <tr><td colspan="${totalCols}" style="height:10px; border:none;"></td></tr>
 
-      <!-- Table Header Row (Dynamically Rendered Active Columns) -->
+      <!-- Empty separator line -->
+      <tr style="height:6px;"><td colspan="13" style="border:none; height:6px;"></td></tr>
+
+      <!-- Multi-Level PMG Table Header -->
       <thead>
-        <tr>
-          ${headersHtml}
-          <th>Entité</th>
-          <th>groupe utilisateur</th>
-          <th>&larr; Input (Quoi)</th>
-          <th>Output (Quoi) &rarr;</th>
-          <th>Mode de réalisation<br><span style="font-weight:normal; font-size:8pt;">(Automatisé/Manuel)</span></th>
-          <th>Applicable dans quel cas ?<br><span style="font-weight:normal; font-size:8pt;">(Exemple FH ou PTTA)</span></th>
-          <th>Processus Fille</th>
-          <th>Commentaires</th>
+        <tr x:autofilter="all">
+          <th x:autofilter="all" style="width: 170px; background-color: #002060;">
+            Briques Primaires<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">Niveau N0</span>
+          </th>
+          <th x:autofilter="all" style="width: 200px; background-color: #002060;">
+            Processus Métier Macro<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">Niveau N1</span>
+          </th>
+          <th x:autofilter="all" style="width: 190px; background-color: #002060;">
+            Sous-Processus Métier<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">Niveau N2</span>
+          </th>
+          <th x:autofilter="all" style="width: 190px; background-color: #002060;">
+            Sous-Processus Métier<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">Niveau N3</span>
+          </th>
+          <th x:autofilter="all" style="width: 240px; background-color: #002060;">
+            Tâche Métier<br>
+            <span style="font-weight:bold; font-size:7.5pt; color:#FDE047;">Niveau N4 (Finale)</span>
+          </th>
+          <th x:autofilter="all" style="width: 110px; background-color: #002060;">
+            Entité<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">Lane / Pôle</span>
+          </th>
+          <th x:autofilter="all" style="width: 170px; background-color: #002060;">
+            Groupe Utilisateur<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">Candidate Group</span>
+          </th>
+          <th x:autofilter="all" style="width: 220px; background-color: #002060;">
+            Input (Quoi)<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">1 variable / ligne</span>
+          </th>
+          <th x:autofilter="all" style="width: 220px; background-color: #002060;">
+            Output (Quoi)<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">1 variable / ligne</span>
+          </th>
+          <th x:autofilter="all" style="width: 130px; background-color: #002060;">
+            Mode de Réalisation<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">Auto / Manuelle / SP0</span>
+          </th>
+          <th x:autofilter="all" style="width: 170px; background-color: #002060;">
+            Applicable dans quel cas ?<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">Condition / Règle</span>
+          </th>
+          <th x:autofilter="all" style="width: 150px; background-color: #002060;">
+            Processus Parent<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">Origine BPMN</span>
+          </th>
+          <th x:autofilter="all" style="width: 230px; background-color: #002060;">
+            Commentaires / Doc<br>
+            <span style="font-weight:normal; font-size:7.5pt; color:#93C5FD;">Spécifications</span>
+          </th>
         </tr>
       </thead>
       <tbody>
   `;
 
-  for (let r = 0; r < numRows; r++) {
-    const rowData = processedRows[r];
-    const spanData = spans[r];
+  // 6. Output Table Data Rows: EACH VARIABLE ON ITS OWN EXCEL ROW (<tr>)
+  for (let i = 0; i < numActs; i++) {
+    const act = actBlocks[i];
+    const span = spans[i];
+    const count = act.rowCount;
 
-    html += `<tr>`;
+    for (let r = 0; r < count; r++) {
+      html += '<tr>';
 
-    levelDefs.forEach((def, defIdx) => {
-      const key = def.key;
-      if (spanData['show_' + key]) {
-        const spanVal = spanData['span_' + key];
-        const valSafe = escHtml(sanitizeFormula(rowData[key]));
-        if (defIdx === 0) {
-          const bgColor = bgColors[l1ColorIdx % bgColors.length];
-          l1ColorIdx++;
-          html += `<td rowspan="${spanVal}" style="background-color:${bgColor}; font-weight:bold; text-align:center; vertical-align:middle; width:140px;">${valSafe}</td>`;
-        } else if (defIdx === 1) {
-          html += `<td rowspan="${spanVal}" style="text-align:center; background:#F2F2F2; vertical-align:middle; width:130px;">${valSafe}</td>`;
-        } else {
-          html += `<td rowspan="${spanVal}" style="text-align:center; vertical-align:middle; width:130px;">${valSafe}</td>`;
+      // Values for Input and Output on this specific row
+      const inVal = act.inList[r] || (act.inList.length === 0 ? 'NA' : '—');
+      const outVal = act.outList[r] || (act.outList.length === 0 ? 'NA' : '—');
+
+      const inClass = inVal === 'NA' ? 'class="cell-na"' : (inVal === '—' ? 'class="cell-empty"' : '');
+      const outClass = outVal === 'NA' ? 'class="cell-na"' : (outVal === '—' ? 'class="cell-empty"' : '');
+
+      if (r === 0) {
+        // Col N0 : Brique Primaire
+        if (span['show_colN0']) {
+          const n0Val = act.colN0;
+          const n0Bg = n0Palette[Array.from(n0ColorMap.keys()).indexOf(n0Val) % n0Palette.length] || '#FFC000';
+          const n0Class = n0Val === 'NA' ? 'class="cell-na"' : '';
+          html += `<td rowspan="${span['span_colN0']}" ${n0Class} style="background-color:${n0Bg}; font-weight:900; font-size:10.5pt; text-align:center; vertical-align:middle; border:1.5px solid #000000; padding:10px 6px;">${escHtml(sanitizeFormula(n0Val))}</td>`;
         }
-      }
-    });
 
-    html += `
-        <td style="text-align:center; font-weight:600; width:140px;">${escHtml(sanitizeFormula(rowData.colTask))}</td>
-        <td style="text-align:center; font-weight:600;">${escHtml(sanitizeFormula(rowData.entity))}</td>
-        <td style="text-align:center;">${escHtml(sanitizeFormula(rowData.userGroup))}</td>
-        <td style="color:#1F4E78;">${escHtml(sanitizeFormula(rowData.inputs))}</td>
-        <td style="color:#1F4E78;">${escHtml(sanitizeFormula(rowData.outputs))}</td>
-        <td style="text-align:center; font-weight:600;">${escHtml(sanitizeFormula(rowData.mode))}</td>
-        <td>${escHtml(sanitizeFormula(rowData.applicableCase))}</td>
-        <td style="text-align:center;">${escHtml(sanitizeFormula(rowData.processFille))}</td>
-        <td>${escHtml(sanitizeFormula(rowData.comment))}</td>
-      </tr>`;
+        // Col N1 : Macro Processus
+        if (span['show_colN1']) {
+          const n1Val = act.colN1;
+          const n1Class = n1Val === 'NA' ? 'class="cell-na"' : '';
+          html += `<td rowspan="${span['span_colN1']}" ${n1Class} style="font-weight:bold; font-size:9pt; vertical-align:middle; padding:8px 6px; background:#FAFAFA;">${escHtml(sanitizeFormula(n1Val))}</td>`;
+        }
+
+        // Col N2 : Sous-Processus L2
+        if (span['show_colN2']) {
+          const n2Val = act.colN2;
+          const n2Class = n2Val === 'NA' ? 'class="cell-na"' : '';
+          html += `<td rowspan="${span['span_colN2']}" ${n2Class} style="vertical-align:middle; padding:7px 6px; font-size:9pt;">${escHtml(sanitizeFormula(n2Val))}</td>`;
+        }
+
+        // Col N3 : Sous-Processus L3
+        if (span['show_colN3']) {
+          const n3Val = act.colN3;
+          const n3Class = n3Val === 'NA' ? 'class="cell-na"' : '';
+          html += `<td rowspan="${span['span_colN3']}" ${n3Class} style="vertical-align:middle; padding:7px 6px; font-size:9pt;">${escHtml(sanitizeFormula(n3Val))}</td>`;
+        }
+
+        // Col N4 : Tâche Finale
+        const n4Val = act.colN4;
+        const n4Class = n4Val === 'NA' ? 'class="cell-na"' : '';
+        html += `<td rowspan="${count}" ${n4Class} style="font-weight:600; font-size:9pt; padding:7px 8px; vertical-align:middle;">${escHtml(sanitizeFormula(n4Val))}</td>`;
+
+        // Entité
+        const entClass = act.entity === 'NA' ? 'class="cell-na"' : '';
+        html += `<td rowspan="${count}" ${entClass} style="text-align:center; font-weight:700; color:#0F172A; background:#F8FAFC; vertical-align:middle;">${escHtml(sanitizeFormula(act.entity))}</td>`;
+
+        // Groupe Utilisateur
+        const grpClass = act.userGroup === 'NA' ? 'class="cell-na"' : '';
+        html += `<td rowspan="${count}" ${grpClass} style="text-align:center; font-family:'Cascadia Code', Consolas, Calibri, monospace; font-size:8.5pt; color:#0F172A; vertical-align:middle;">${escHtml(sanitizeFormula(act.userGroup))}</td>`;
+
+        // Input 1st row
+        html += `<td ${inClass} style="color:#1E3A8A; font-family:'Cascadia Code', Consolas, Calibri, sans-serif; font-size:8.5pt; padding:5px 8px; font-weight:600;">${escHtml(sanitizeFormula(inVal))}</td>`;
+
+        // Output 1st row
+        html += `<td ${outClass} style="color:#1E3A8A; font-family:'Cascadia Code', Consolas, Calibri, sans-serif; font-size:8.5pt; padding:5px 8px; font-weight:600;">${escHtml(sanitizeFormula(outVal))}</td>`;
+
+        // Mode
+        let modeBg = '#FFFFFF', modeColor = '#1E293B';
+        if (act.mode.includes('Call')) { modeBg = '#FAF5FF'; modeColor = '#6D28D9'; }
+        else if (act.mode.includes('Auto')) { modeBg = '#ECFDF5'; modeColor = '#047857'; }
+        else if (act.mode.includes('Manuelle')) { modeBg = '#EFF6FF'; modeColor = '#1E40AF'; }
+        html += `<td rowspan="${count}" style="text-align:center; font-weight:700; font-size:8.5pt; background:${modeBg}; color:${modeColor}; vertical-align:middle;">${escHtml(sanitizeFormula(act.mode))}</td>`;
+
+        // Applicable dans quel cas
+        const caseClass = act.applicableCase === 'NA' ? 'class="cell-na"' : '';
+        html += `<td rowspan="${count}" ${caseClass} style="font-size:8.5pt; vertical-align:middle;">${escHtml(sanitizeFormula(act.applicableCase))}</td>`;
+
+        // Processus Parent
+        html += `<td rowspan="${count}" style="text-align:center; font-weight:700; color:#002060; font-size:8.5pt; background:#F1F5F9; vertical-align:middle;">${escHtml(sanitizeFormula(act.parentProcess))}</td>`;
+
+        // Commentaires
+        html += `<td rowspan="${count}" style="color:#475569; font-size:8.5pt; vertical-align:middle;">${escHtml(sanitizeFormula(act.comment))}</td>`;
+      } else {
+        // Sub-rows (r > 0): Only output the Input and Output columns
+        html += `<td ${inClass} style="color:#1E3A8A; font-family:'Cascadia Code', Consolas, Calibri, sans-serif; font-size:8.5pt; padding:5px 8px; font-weight:600;">${escHtml(sanitizeFormula(inVal))}</td>`;
+        html += `<td ${outClass} style="color:#1E3A8A; font-family:'Cascadia Code', Consolas, Calibri, sans-serif; font-size:8.5pt; padding:5px 8px; font-weight:600;">${escHtml(sanitizeFormula(outVal))}</td>`;
+      }
+
+      html += '</tr>';
+    }
   }
 
   html += `
@@ -3753,6 +6038,7 @@ window.exportPmgExcel = function() {
   </html>
   `;
 
+  // 7. Trigger Excel (.xls) Download
   const blob = new Blob(["\uFEFF" + html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
@@ -3763,6 +6049,15 @@ window.exportPmgExcel = function() {
 };
 
 window.exportPmgPDF = function() {
+  const activitiesToExport = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || []);
+
+  if (!activitiesToExport || activitiesToExport.length === 0) {
+    alert("Aucune activité ne correspond aux filtres de types sélectionnés.");
+    return;
+  }
+
   const processName = document.getElementById('pmgProcessName').value || 'Non défini';
   const processId = document.getElementById('pmgProcessId').value || 'Non défini';
   const version = document.getElementById('pmgProcessVersion').value || '';
@@ -3778,9 +6073,9 @@ window.exportPmgPDF = function() {
   }
   
   let rowsHTML = '';
-  window.pmgActivities.forEach(act => {
-    const rowInputs = act.inputs.length ? act.inputs.map(i => `<li>${esc(i)}</li>`).join('') : '<li>Aucun</li>';
-    const rowOutputs = act.outputs.length ? act.outputs.map(o => `<li>${esc(o)}</li>`).join('') : '<li>Aucun</li>';
+  activitiesToExport.forEach(act => {
+    const rowInputs = (act.inputs || []).length ? act.inputs.map(i => `<li>${esc(i)}</li>`).join('') : '<li>Aucun</li>';
+    const rowOutputs = (act.outputs || []).length ? act.outputs.map(o => `<li>${esc(o)}</li>`).join('') : '<li>Aucun</li>';
     
     const caseVal = document.querySelector(`.pmg-case[data-id="${act.id}"]`)?.value || act.applicableCase || '';
     const commentVal = document.querySelector(`.pmg-comment[data-id="${act.id}"]`)?.value || act.comment || '';
@@ -4230,7 +6525,9 @@ window.renderPmgVariableGlossary = function() {
 
 // Technical Documentation Markdown generator
 window.generatePmgMarkdown = function() {
-  const activities = window.pmgActivities || [];
+  const activities = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || window.pmgTempSubprocesses || []);
   const details = window.pmgProcessDetails || {};
   
   const name = document.getElementById('pmgProcessName')?.value || details.name || 'Processus sans nom';
@@ -4332,7 +6629,9 @@ window.generatePmgMarkdown = function() {
 
 // HTML rendering for documentation preview and printer
 window.generatePmgHtml = function(isForPrint) {
-  const activities = window.pmgActivities || [];
+  const activities = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || window.pmgTempSubprocesses || []);
   const details = window.pmgProcessDetails || {};
   
   const name = document.getElementById('pmgProcessName')?.value || details.name || 'Processus sans nom';
@@ -4559,10 +6858,11 @@ window.openPmgEditTreeNodeModal = function(actId) {
   if (!modal) return;
 
   const activities = window.pmgTempSubprocesses || [];
-  const target = activities.find(a => a.id === actId || a.name === actId);
+  const target = activities.find(a => (a.uniqueId && a.uniqueId === actId) || a.id === actId || a.name === actId);
   if (!target) return;
 
-  document.getElementById('pmgEditActOriginalId').value = target.id || target.name;
+  const targetKey = target.uniqueId || target.id || target.name;
+  document.getElementById('pmgEditActOriginalId').value = targetKey;
   document.getElementById('pmgEditActName').value = target.name || '';
   document.getElementById('pmgEditActType').value = target.type || 'User Task';
   document.getElementById('pmgEditActEntity').value = target.entity && target.entity !== 'Non défini' ? target.entity : '';
@@ -4571,11 +6871,12 @@ window.openPmgEditTreeNodeModal = function(actId) {
   if (parentSelect) {
     parentSelect.innerHTML = '<option value="">-- Aucun (Processus Parent / Brique Primaire N0) --</option>';
     activities.forEach(act => {
-      if (act.id !== target.id && act.name !== target.name) {
+      const actKey = act.uniqueId || act.id || act.name;
+      if (actKey !== targetKey) {
         const opt = document.createElement('option');
-        opt.value = act.name;
-        opt.textContent = `${act.name} (Niveau ${act.level})`;
-        if (act.name.toLowerCase() === (target.parentId || '').toLowerCase() || act.id.toLowerCase() === (target.parentId || '').toLowerCase()) {
+        opt.value = actKey;
+        opt.textContent = `${act.name} [ID: ${act.id || act.name}] (Niveau ${act.level || 1})`;
+        if (target.parentId && (target.parentId === actKey || target.parentId === act.id || target.parentId === act.name || (act.name && target.parentId.toLowerCase() === act.name.toLowerCase()))) {
           opt.selected = true;
         }
         parentSelect.appendChild(opt);
@@ -4596,7 +6897,7 @@ window.savePmgTreeNodeEdits = function() {
   if (!origId) return;
 
   const activities = window.pmgTempSubprocesses || [];
-  const target = activities.find(a => a.id === origId || a.name === origId);
+  const target = activities.find(a => (a.uniqueId && a.uniqueId === origId) || a.id === origId || a.name === origId);
   if (!target) return;
 
   const newName = (document.getElementById('pmgEditActName')?.value || '').trim();
@@ -4610,25 +6911,29 @@ window.savePmgTreeNodeEdits = function() {
   target.type = document.getElementById('pmgEditActType')?.value || 'User Task';
   target.entity = (document.getElementById('pmgEditActEntity')?.value || '').trim() || 'Non défini';
 
-  const mapByName = new Map();
+  const mapByUniqueId = new Map();
   const mapById = new Map();
+  const mapByName = new Map();
   activities.forEach(act => {
-    mapByName.set(act.name.toLowerCase(), act);
-    mapById.set(act.id.toLowerCase(), act);
+    if (act.uniqueId) mapByUniqueId.set(act.uniqueId, act);
+    if (act.id) mapById.set(act.id, act);
+    if (act.name) mapByName.set(act.name.toLowerCase(), act);
   });
 
   const getLevel = (act, visited = new Set()) => {
     if (!act || !act.parentId) return 1;
-    if (visited.has(act.id || act.name)) return 1;
-    visited.add(act.id || act.name);
+    const actKey = act.uniqueId || act.id || act.name;
+    if (visited.has(actKey)) return 1;
+    visited.add(actKey);
 
-    const parent = mapByName.get(act.parentId.toLowerCase()) || mapById.get(act.parentId.toLowerCase());
+    const parent = mapByUniqueId.get(act.parentId) || mapById.get(act.parentId) || mapByName.get(act.parentId.toLowerCase());
     return parent ? 1 + getLevel(parent, visited) : 2;
   };
 
   activities.forEach(act => {
     act.level = getLevel(act);
-    act.parentName = act.parentId ? act.parentId : 'Processus Parent (Racine)';
+    const pObj = mapByUniqueId.get(act.parentId) || mapById.get(act.parentId) || mapByName.get((act.parentId || '').toLowerCase());
+    act.parentName = pObj ? pObj.name : (act.parentId ? act.parentId : 'Processus Parent (Racine)');
   });
 
   window.closePmgEditTreeNodeModal();
@@ -4644,7 +6949,7 @@ window.deletePmgTreeNodeFromModal = function() {
   if (!origId) return;
 
   if (confirm("Voulez-vous vraiment supprimer cette activité et ses références ?")) {
-    window.pmgTempSubprocesses = (window.pmgTempSubprocesses || []).filter(a => a.id !== origId && a.name !== origId);
+    window.pmgTempSubprocesses = (window.pmgTempSubprocesses || []).filter(a => (a.uniqueId && a.uniqueId !== origId) && a.id !== origId && a.name !== origId);
     window.closePmgEditTreeNodeModal();
     window.renderPmgVisualTree(window.pmgTempSubprocesses);
     if (window.renderPmgStep2ManualTable) window.renderPmgStep2ManualTable();
@@ -4661,14 +6966,16 @@ window.addNewPmgSubactivity = function(parentId = '') {
   const activities = window.pmgTempSubprocesses || [];
   const newId = `act_${activities.length + 1}_${name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
 
-  const parentObj = parentId ? activities.find(a => a.id === parentId || a.name === parentId) : null;
+  const parentObj = parentId ? activities.find(a => (a.uniqueId && a.uniqueId === parentId) || a.id === parentId || a.name === parentId) : null;
+  const parentKey = parentObj ? (parentObj.uniqueId || parentObj.id || parentObj.name) : '';
   const parentName = parentObj ? parentObj.name : '';
-  const newLevel = parentObj ? parentObj.level + 1 : 1;
+  const newLevel = parentObj ? (parentObj.level || 1) + 1 : 1;
 
   const newAct = {
     id: newId,
+    uniqueId: newId,
     name: name.trim(),
-    parentId: parentName,
+    parentId: parentKey,
     parentName: parentName || 'Processus Parent (Racine)',
     type: 'User Task',
     typeLabel: 'User Task',
@@ -4890,215 +7197,399 @@ window.loadPmgTemplate = function(templateKey) {
 };
 
 // ---------- PMG Feature 3: Data Lineage Auditor & Consistency Check ----------
+
 window.renderPmgDataLineageAudit = function() {
   const container = document.getElementById('pmgDataLineageAuditContainer');
   if (!container) return;
 
-  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
+  const activities = (window.pmgTempSubprocesses && window.pmgTempSubprocesses.length > 0)
+    ? window.pmgTempSubprocesses
+    : (window.pmgActivities || []);
+
   if (activities.length === 0) {
     container.innerHTML = '<span style="color:var(--text-tertiary);">Aucune activité chargée pour analyser le lignage.</span>';
     return;
   }
 
-  const allInputs = new Map();
-  const allOutputs = new Map();
+  function getCleanVarName(str) {
+    if (!str) return '';
+    let s = String(str).trim();
+    if (s.startsWith('=')) s = s.substring(1).trim();
+    const idx = s.indexOf('(');
+    if (idx !== -1) s = s.substring(0, idx).trim();
+    if (s.includes('=')) s = s.split('=')[0].trim();
+    if (s.includes(':')) s = s.split(':')[0].trim();
+    s = s.replace(/^[="'\[]+|[="'\]]+$/g, '').trim();
+    return s;
+  }
+
+  function suggestCamelCase(v) {
+    if (!v) return '';
+    let s = v.replace(/^[._\-]+/, ''); // remove leading underscores/dots
+    s = s.replace(/[\s_\-]+(.)/g, (_, c) => c.toUpperCase());
+    s = s.replace(/^[A-Z]/, c => c.toLowerCase());
+    return s || v;
+  }
+
+  const allInputs = new Map(); // varName -> Array of { actName, parentProc }
+  const allOutputs = new Map(); // varName -> Array of { actName, parentProc }
   const camelCaseRegex = /^[a-z][a-zA-Z0-9]*$/;
 
   activities.forEach(act => {
+    const parentProc = act.parentProcessName || act.rootParentName || 'Processus';
     (act.inputs || []).forEach(i => {
-      const v = getVarName(i);
-      if (v) {
+      const v = getCleanVarName(i);
+      if (v && v.length > 0) {
         if (!allInputs.has(v)) allInputs.set(v, []);
-        allInputs.get(v).push(act.name);
+        allInputs.get(v).push({ actName: act.name, parentProc });
       }
     });
     (act.outputs || []).forEach(o => {
-      const v = getVarName(o);
-      if (v) {
+      const v = getCleanVarName(o);
+      if (v && v.length > 0) {
         if (!allOutputs.has(v)) allOutputs.set(v, []);
-        allOutputs.get(v).push(act.name);
+        allOutputs.get(v).push({ actName: act.name, parentProc });
       }
     });
   });
 
   const orphanInputs = [];
   const unusedOutputs = [];
-  const nonCamelCaseVars = [];
+  const namingIssues = [];
 
-  allInputs.forEach((consumers, v) => {
+  // Detect Orphan Inputs & Categorize Reason
+  allInputs.forEach((consumersList, v) => {
     if (!allOutputs.has(v)) {
-      orphanInputs.push({ varName: v, consumers });
+      // Deduplicate consumer names
+      const uniqueConsumers = Array.from(new Set(consumersList.map(c => c.actName)));
+      const uniqueParents = Array.from(new Set(consumersList.map(c => c.parentProc)));
+
+      // Intelligent Reason Classification
+      let category = 'risk';
+      let reasonLabel = '⚠️ Non initialisée en amont (Risque d\'exécution)';
+      let badgeStyle = 'background:rgba(239, 68, 68, 0.1); color:var(--err); border:1px solid rgba(239, 68, 68, 0.25);';
+
+      const vLower = v.toLowerCase();
+      if (vLower.includes('id') || vLower.includes('dossier') || vLower.includes('site') || vLower.includes('demande') || vLower.includes('projet') || vLower.includes('client') || vLower.includes('token') || vLower.includes('auth')) {
+        category = 'payload_start';
+        reasonLabel = '🌟 Payload d\'Initialisation (Start Event / API)';
+        badgeStyle = 'background:rgba(59, 130, 246, 0.1); color:var(--brand-primary); border:1px solid rgba(59, 130, 246, 0.25);';
+      } else if (vLower.includes('loop') || vLower.includes('count') || vLower.includes('index') || vLower.includes('iteration') || vLower.includes('missing') || vLower.includes('flag')) {
+        category = 'context_loop';
+        reasonLabel = '🔄 Variable de Contexte / Boucle Zeebe';
+        badgeStyle = 'background:rgba(99, 102, 241, 0.1); color:#6366f1; border:1px solid rgba(99, 102, 241, 0.25);';
+      }
+
+      orphanInputs.push({
+        varName: v,
+        consumers: uniqueConsumers,
+        parents: uniqueParents,
+        category,
+        reasonLabel,
+        badgeStyle
+      });
     }
+
     if (!camelCaseRegex.test(v)) {
-      nonCamelCaseVars.push(v);
+      let problem = 'Format non-camelCase';
+      if (v.includes(' ')) problem = 'Espaces interdits';
+      else if (v.startsWith('_') || v.startsWith('.')) problem = 'Préfixe spécial non recommandé';
+      else if (v.includes('_')) problem = 'snake_case détecté';
+      else if (/^[A-Z]/.test(v)) problem = 'PascalCase / Majuscule initiale';
+
+      namingIssues.push({
+        varName: v,
+        problem,
+        suggestion: suggestCamelCase(v)
+      });
     }
   });
 
-  allOutputs.forEach((producers, v) => {
+  // Detect Unused Outputs & Categorize Reason
+  allOutputs.forEach((producersList, v) => {
     if (!allInputs.has(v)) {
-      unusedOutputs.push({ varName: v, producers });
+      const uniqueProducers = Array.from(new Set(producersList.map(p => p.actName)));
+      const uniqueParents = Array.from(new Set(producersList.map(p => p.parentProc)));
+
+      let category = 'unused';
+      let reasonLabel = '📊 Donnée d\'Audit / Stockage d\'instance';
+      let badgeStyle = 'background:rgba(245, 158, 11, 0.1); color:var(--warn); border:1px solid rgba(245, 158, 11, 0.25);';
+
+      const vLower = v.toLowerCase();
+      if (vLower.includes('statut') || vLower.includes('result') || vLower.includes('accord') || vLower.includes('rapport') || vLower.includes('pv') || vLower.includes('output') || vLower.includes('ack') || vLower.includes('code') || vLower.includes('valide')) {
+        category = 'payload_end';
+        reasonLabel = '📤 Livrable Final / Payload Exporté';
+        badgeStyle = 'background:rgba(16, 185, 129, 0.1); color:var(--ok); border:1px solid rgba(16, 185, 129, 0.25);';
+      }
+
+      unusedOutputs.push({
+        varName: v,
+        producers: uniqueProducers,
+        parents: uniqueParents,
+        category,
+        reasonLabel,
+        badgeStyle
+      });
     }
-    if (!camelCaseRegex.test(v) && !nonCamelCaseVars.includes(v)) {
-      nonCamelCaseVars.push(v);
+
+    if (!camelCaseRegex.test(v) && !namingIssues.some(n => n.varName === v)) {
+      let problem = 'Format non-camelCase';
+      if (v.includes(' ')) problem = 'Espaces interdits';
+      else if (v.startsWith('_') || v.startsWith('.')) problem = 'Préfixe spécial non recommandé';
+      else if (v.includes('_')) problem = 'snake_case détecté';
+      else if (/^[A-Z]/.test(v)) problem = 'PascalCase / Majuscule initiale';
+
+      namingIssues.push({
+        varName: v,
+        problem,
+        suggestion: suggestCamelCase(v)
+      });
     }
   });
+
+  const totalFlows = allInputs.size + allOutputs.size;
+  const criticalOrphans = orphanInputs.filter(o => o.category === 'risk').length;
 
   let html = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
-      <h5 style="margin:0; font-size:13px; font-weight:600; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
-        🔍 Audit de Lignage &amp; Cohérence des Variables (${allInputs.size + allOutputs.size} flux découverts)
-      </h5>
-      <span style="font-size:11px; padding:2px 8px; border-radius:10px; background:${orphanInputs.length === 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)'}; color:${orphanInputs.length === 0 ? 'var(--ok)' : 'var(--err)'}; font-weight:600;">
-        ${orphanInputs.length === 0 ? '✅ Lignage Produit/Consommé Conforme' : '⚠️ Anomalies détectées'}
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:10px; flex-wrap:wrap; gap:8px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:18px;">🔍</span>
+        <div>
+          <h5 style="margin:0; font-size:13.5px; font-weight:700; color:var(--text-primary);">
+            Audit de Lignage &amp; Cohérence des Variables (${totalFlows} variables déclarées)
+          </h5>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin-top:2px;">
+            Analyse sémantique du cycle de vie des données : entrées requises, sorties livrées et conformité BPMN.
+          </div>
+        </div>
+      </div>
+      <span style="font-size:11px; padding:3px 10px; border-radius:12px; ${criticalOrphans === 0 ? 'background:rgba(16, 185, 129, 0.12); color:var(--ok); border:1px solid rgba(16, 185, 129, 0.3);' : 'background:rgba(239, 68, 68, 0.12); color:var(--err); border:1px solid rgba(239, 68, 68, 0.3);'} font-weight:700;">
+        ${criticalOrphans === 0 ? '✅ Flux de Données Équilibré' : '⚠️ ' + criticalOrphans + ' Entrée(s) Non Initialisée(s)'}
       </span>
     </div>
-    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:12px;">
+
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">
   `;
 
-  // Orphan inputs card
+  // 1. ORPHAN INPUTS CARD
   html += `
-    <div style="background:var(--bg-card); padding:12px; border-radius:6px; border:1px solid var(--border-color);">
-      <div style="font-size:12px; font-weight:600; color:var(--err); margin-bottom:6px; display:flex; justify-content:space-between;">
-        <span>🔴 Variables d'Entrée Orphelines (${orphanInputs.length})</span>
+    <div style="background:var(--bg-card); padding:14px; border-radius:var(--border-radius-md); border:1px solid var(--border-color); display:flex; flex-direction:column;">
+      <div style="font-size:12.5px; font-weight:700; color:var(--text-primary); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+        <span>🔴 Variables d'Entrée Consommées (${orphanInputs.length})</span>
+        <span style="font-size:10.5px; color:var(--text-tertiary);">Non produites localement</span>
       </div>
-      <div style="font-size:11px; color:var(--text-secondary); max-height:120px; overflow-y:auto;">
+      <div style="font-size:11.5px; color:var(--text-secondary); flex:1; max-height:220px; overflow-y:auto; padding-right:4px;">
   `;
+
   if (orphanInputs.length === 0) {
-    html += `<span style="color:var(--ok);">Toutes les variables consommées sont bien produites en amont !</span>`;
+    html += '<div style="color:var(--ok); padding:15px 0; text-align:center;">✨ Toutes les variables consommées sont produites en amont par d\'autres tâches !</div>';
   } else {
     orphanInputs.forEach(item => {
-      html += `<div style="margin-bottom:4px;">• <code style="color:var(--err); font-weight:bold;">${item.varName}</code> (Lue par : ${item.consumers.join(', ')})</div>`;
+      const consumersPreview = item.consumers.slice(0, 2).join(', ');
+      const extraCount = item.consumers.length - 2;
+      const extraText = extraCount > 0 ? ` <span style="color:var(--brand-primary); cursor:pointer;" title="${escAttr(item.consumers.join(', '))}">+ ${extraCount} autre(s)</span>` : '';
+      const parentName = item.parents.slice(0, 2).join(', ');
+
+      html += `
+        <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:8px 10px; margin-bottom:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; flex-wrap:wrap; gap:4px;">
+            <code style="color:var(--text-primary); font-weight:700; font-size:12px; background:rgba(0,156,215,0.08); padding:1px 5px; border-radius:4px;">${escHtml(item.varName)}</code>
+            <span style="font-size:10px; padding:1px 6px; border-radius:10px; font-weight:600; ${item.badgeStyle}">${item.reasonLabel}</span>
+          </div>
+          <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+            <strong>Consommée par :</strong> ${escHtml(consumersPreview)}${extraText}
+          </div>
+          <div style="font-size:10.5px; color:var(--text-tertiary); margin-top:2px;">
+            🏛️ <em>${escHtml(parentName)}</em>
+          </div>
+        </div>
+      `;
     });
   }
-  html += `</div></div>`;
+  html += '</div></div>';
 
-  // Unused outputs card
+  // 2. UNUSED OUTPUTS CARD
   html += `
-    <div style="background:var(--bg-card); padding:12px; border-radius:6px; border:1px solid var(--border-color);">
-      <div style="font-size:12px; font-weight:600; color:var(--warn); margin-bottom:6px; display:flex; justify-content:space-between;">
-        <span>🟡 Variables de Sortie Inutilisées (${unusedOutputs.length})</span>
+    <div style="background:var(--bg-card); padding:14px; border-radius:var(--border-radius-md); border:1px solid var(--border-color); display:flex; flex-direction:column;">
+      <div style="font-size:12.5px; font-weight:700; color:var(--text-primary); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+        <span>🟡 Variables de Sortie Générées (${unusedOutputs.length})</span>
+        <span style="font-size:10.5px; color:var(--text-tertiary);">Non consommées en interne</span>
       </div>
-      <div style="font-size:11px; color:var(--text-secondary); max-height:120px; overflow-y:auto;">
+      <div style="font-size:11.5px; color:var(--text-secondary); flex:1; max-height:220px; overflow-y:auto; padding-right:4px;">
   `;
+
   if (unusedOutputs.length === 0) {
-    html += `<span style="color:var(--ok);">Toutes les variables générées sont lues en aval !</span>`;
+    html += '<div style="color:var(--ok); padding:15px 0; text-align:center;">✨ Toutes les variables générées sont consommées par des tâches en aval !</div>';
   } else {
     unusedOutputs.forEach(item => {
-      html += `<div style="margin-bottom:4px;">• <code style="color:var(--warn); font-weight:bold;">${item.varName}</code> (Créée par : ${item.producers.join(', ')})</div>`;
-    });
-  }
-  html += `</div></div>`;
+      const producersPreview = item.producers.slice(0, 2).join(', ');
+      const extraCount = item.producers.length - 2;
+      const extraText = extraCount > 0 ? ` <span style="color:var(--brand-primary); cursor:pointer;" title="${escAttr(item.producers.join(', '))}">+ ${extraCount} autre(s)</span>` : '';
+      const parentName = item.parents.slice(0, 2).join(', ');
 
-  // Format conventions card
-  html += `
-    <div style="background:var(--bg-card); padding:12px; border-radius:6px; border:1px solid var(--border-color);">
-      <div style="font-size:12px; font-weight:600; color:var(--info); margin-bottom:6px; display:flex; justify-content:space-between;">
-        <span>💡 Conventions de Nommage (${nonCamelCaseVars.length})</span>
-      </div>
-      <div style="font-size:11px; color:var(--text-secondary); max-height:120px; overflow-y:auto;">
-  `;
-  if (nonCamelCaseVars.length === 0) {
-    html += `<span style="color:var(--ok);">Toutes les variables respectent le format standard camelCase !</span>`;
-  } else {
-    nonCamelCaseVars.forEach(v => {
-      html += `<div style="margin-bottom:4px;">• Nom à réviser : <code>${v}</code></div>`;
+      html += `
+        <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:8px 10px; margin-bottom:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; flex-wrap:wrap; gap:4px;">
+            <code style="color:var(--text-primary); font-weight:700; font-size:12px; background:rgba(245,158,11,0.08); padding:1px 5px; border-radius:4px;">${escHtml(item.varName)}</code>
+            <span style="font-size:10px; padding:1px 6px; border-radius:10px; font-weight:600; ${item.badgeStyle}">${item.reasonLabel}</span>
+          </div>
+          <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+            <strong>Produite par :</strong> ${escHtml(producersPreview)}${extraText}
+          </div>
+          <div style="font-size:10.5px; color:var(--text-tertiary); margin-top:2px;">
+            🏛️ <em>${escHtml(parentName)}</em>
+          </div>
+        </div>
+      `;
     });
   }
-  html += `</div></div></div>`;
+  html += '</div></div>';
+
+  // 3. NAMING CONVENTIONS CARD
+  html += `
+    <div style="background:var(--bg-card); padding:14px; border-radius:var(--border-radius-md); border:1px solid var(--border-color); display:flex; flex-direction:column;">
+      <div style="font-size:12.5px; font-weight:700; color:var(--text-primary); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+        <span>💡 Conventions &amp; Qualité du Nommage (${namingIssues.length})</span>
+        <span style="font-size:10.5px; color:var(--text-tertiary);">Recommandations camelCase</span>
+      </div>
+      <div style="font-size:11.5px; color:var(--text-secondary); flex:1; max-height:220px; overflow-y:auto; padding-right:4px;">
+  `;
+
+  if (namingIssues.length === 0) {
+    html += '<div style="color:var(--ok); padding:15px 0; text-align:center;">✨ 100% des variables respectent la norme <code>camelCase</code> !</div>';
+  } else {
+    namingIssues.forEach(item => {
+      html += `
+        <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:8px 10px; margin-bottom:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <code style="color:var(--err); font-weight:700;">${escHtml(item.varName)}</code>
+            <span style="font-size:10px; color:var(--text-tertiary); font-style:italic;">${escHtml(item.problem)}</span>
+          </div>
+          <div style="font-size:11px; color:var(--text-secondary);">
+            Correction suggérée : <strong style="color:var(--ok); font-family:var(--font-mono);">${escHtml(item.suggestion)}</strong>
+          </div>
+        </div>
+      `;
+    });
+  }
+  html += '</div></div></div>';
 
   container.innerHTML = html;
 };
 
-// ---------- PMG Feature 2: Matrice Globale Vue Unique Excel-Like ----------
-window.renderPmgGlobalGridTable = function() {
-  const container = document.getElementById('pmgGlobalGridContainer');
+
+window.renderPmgGlobalGridTable = function(containerId = 'pmgMatrixGlobalGridContainer') {
+  let container = document.getElementById(containerId);
+  if (!container) container = document.getElementById('pmgMatrixGlobalGridContainer') || document.getElementById('pmgGlobalGridContainer');
   if (!container) return;
 
-  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
+  const activities = (window.pmgActivities && window.pmgActivities.length > 0)
+    ? window.pmgActivities
+    : (window.pmgTempSubprocesses || []);
+
   if (activities.length === 0) {
-    container.innerHTML = '<span style="color:var(--text-tertiary);">Aucune activité à afficher dans la grille.</span>';
+    container.innerHTML = '<div style="padding:30px; text-align:center; color:var(--text-tertiary);"><span style="font-size:24px;">🩻</span><br><br>Aucune activité à afficher dans la grille. Veuillez importer des fichiers BPMN.</div>';
     return;
   }
 
   const modes = window.pmgRealizationModes || ['SP0', 'Call Activity', 'Manuelle', 'Automatique'];
 
-  let maxLevel = 1;
-  activities.forEach(act => {
-    if (act.level && act.level > maxLevel) maxLevel = act.level;
-  });
-  if (maxLevel > 6) maxLevel = 6;
-
-  const levelHeaderTitles = [
-    { title: 'N0 (Brique)', lvl: 1 },
-    { title: 'N1 (Macro)', lvl: 2 },
-    { title: 'N2 (Sous-Proc)', lvl: 3 },
-    { title: 'N3 (Sous-Proc)', lvl: 4 },
-    { title: 'N4 (Sous-Proc)', lvl: 5 },
-    { title: 'N5 (Sous-Proc)', lvl: 6 }
-  ].filter(h => h.lvl < maxLevel);
-
-  let gridHeadersHtml = '';
-  levelHeaderTitles.forEach(h => {
-    gridHeadersHtml += `<th style="padding:6px; min-width:110px;">${h.title}</th>`;
-  });
-  gridHeadersHtml += `<th style="padding:6px; min-width:120px;">Tâche (N${maxLevel})</th>`;
-
-  let html = `
-    <div style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-      <h5 style="margin:0; font-weight:600; color:var(--text-primary);">🩻 Grille Globale Éditable PMG (${levelHeaderTitles.length + 9} Colonnes Adaptatives)</h5>
-      <span style="font-size:11px; color:var(--text-tertiary);">Modifiez n'importe quelle cellule pour synchroniser l'ensemble du projet</span>
-    </div>
-    <div style="overflow-x:auto; max-height:450px; border:1px solid var(--border-color); border-radius:6px;">
-      <table style="width:100%; border-collapse:collapse; font-size:11px;">
-        <thead>
-          <tr style="background:#002060; color:#fff;">
-            ${gridHeadersHtml}
-            <th style="padding:6px; min-width:110px;">Entité</th>
-            <th style="padding:6px; min-width:110px;">Groupe Utilisateur</th>
-            <th style="padding:6px; min-width:120px;">Inputs</th>
-            <th style="padding:6px; min-width:120px;">Outputs</th>
-            <th style="padding:6px; min-width:110px;">Mode</th>
-            <th style="padding:6px; min-width:120px;">Applicable cas ?</th>
-            <th style="padding:6px; min-width:100px;">Proc. Fille</th>
-            <th style="padding:6px; min-width:120px;">Commentaires</th>
-          </tr>
-        </thead>
-        <tbody>
-  `;
-
+  let rowsHtml = '';
   activities.forEach((act, idx) => {
-    const isSub = act.type.toLowerCase().includes('sous-processus') || act.type.toLowerCase().includes('call');
+    const isSub = (act.type || '').toLowerCase().includes('sous-processus') || (act.type || '').toLowerCase().includes('call');
     const curMode = act.realizationMode || (isSub ? 'Call Activity' : 'Manuelle');
 
     let modeOptsHtml = '';
     modes.forEach(m => {
       const sel = m.toLowerCase() === curMode.toLowerCase() ? 'selected' : '';
-      modeOptsHtml += `<option value="${m}" ${sel}>${m}</option>`;
+      modeOptsHtml += `<option value="${escAttr(m)}" ${sel}>${escHtml(m)}</option>`;
     });
 
-    let rowLevelCellsHtml = '';
-    levelHeaderTitles.forEach(h => {
-      const val = act.level === h.lvl ? act.name : (act.parentId || 'NA');
-      rowLevelCellsHtml += `<td style="padding:4px;"><input type="text" value="${act.level === h.lvl ? act.name : 'NA'}" style="width:100%; height:28px; font-size:11px;"></td>`;
-    });
+    const parentProc = act.parentProcessName || act.rootParentName || 'Parent';
+    const cleanGroup = (typeof window.cleanPmgUserGroupName === 'function')
+      ? window.cleanPmgUserGroupName(act.userGroup)
+      : (act.userGroup || '');
 
-    html += `
+    const inStr = Array.isArray(act.inputs) ? act.inputs.join(', ') : (act.inputs || '');
+    const outStr = Array.isArray(act.outputs) ? act.outputs.join(', ') : (act.outputs || '');
+
+    rowsHtml += `
       <tr style="border-bottom:1px solid var(--border-color);">
-        ${rowLevelCellsHtml}
-        <td style="padding:4px;"><input type="text" value="${act.name}" onchange="updatePmgGridCell(${idx}, 'name', this.value)" style="width:100%; height:28px; font-size:11px; font-weight:600;"></td>
-        <td style="padding:4px;"><input type="text" value="${act.entity || ''}" onchange="updatePmgGridCell(${idx}, 'entity', this.value)" style="width:100%; height:28px; font-size:11px;"></td>
-        <td style="padding:4px;"><input type="text" value="${act.userGroup || ''}" onchange="updatePmgGridCell(${idx}, 'userGroup', this.value)" style="width:100%; height:28px; font-size:11px;"></td>
-        <td style="padding:4px;"><input type="text" value="${(act.inputs || []).join(', ')}" onchange="updatePmgGridCell(${idx}, 'inputs', this.value)" style="width:100%; height:28px; font-size:11px;"></td>
-        <td style="padding:4px;"><input type="text" value="${(act.outputs || []).join(', ')}" onchange="updatePmgGridCell(${idx}, 'outputs', this.value)" style="width:100%; height:28px; font-size:11px;"></td>
-        <td style="padding:4px;"><select onchange="updatePmgGridCell(${idx}, 'realizationMode', this.value)" style="width:100%; height:28px; font-size:11px;">${modeOptsHtml}</select></td>
-        <td style="padding:4px;"><input type="text" value="${act.applicableCase || ''}" onchange="updatePmgGridCell(${idx}, 'applicableCase', this.value)" style="width:100%; height:28px; font-size:11px;"></td>
-        <td style="padding:4px;"><input type="text" value="${act.processFille || (isSub ? act.id : 'NA')}" style="width:100%; height:28px; font-size:11px;"></td>
-        <td style="padding:4px;"><input type="text" value="${act.comment || ''}" onchange="updatePmgGridCell(${idx}, 'comment', this.value)" style="width:100%; height:28px; font-size:11px;"></td>
+        <td style="padding:6px; text-align:center; color:var(--text-tertiary); font-weight:700; width:45px;">#${idx + 1}</td>
+        <td style="padding:4px; min-width:180px;">
+          <input type="text" value="${escAttr(act.name)}" oninput="updatePmgGridCell(${idx}, 'name', this.value)" style="width:100%; height:28px; font-size:11.5px; font-weight:600; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-primary); color:var(--text-primary); padding:2px 6px;">
+          <div style="font-size:10px; color:var(--text-tertiary); margin-top:2px;">id: <code>${escHtml(act.id)}</code> &bull; 🏛️ ${escHtml(parentProc)}</div>
+        </td>
+        <td style="padding:4px; width:110px;">
+          <span style="font-size:10.5px; padding:2px 6px; border-radius:4px; background:rgba(0,156,215,0.1); color:var(--brand-primary); font-weight:600; display:inline-block;">${escHtml(act.typeLabel || act.type)}</span>
+        </td>
+        <td style="padding:4px; min-width:130px;">
+          <input type="text" value="${escAttr(act.entity || '')}" placeholder="Entité..." oninput="updatePmgGridCell(${idx}, 'entity', this.value)" style="width:100%; height:28px; font-size:11.5px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-primary); color:var(--text-primary); padding:2px 6px;">
+        </td>
+        <td style="padding:4px; min-width:140px;">
+          <input type="text" value="${escAttr(cleanGroup)}" placeholder="Groupe..." oninput="updatePmgGridCell(${idx}, 'userGroup', this.value)" style="width:100%; height:28px; font-size:11.5px; font-family:var(--font-mono); border-radius:4px; border:1px solid var(--border-color); background:var(--bg-primary); color:var(--text-primary); padding:2px 6px;">
+        </td>
+        <td style="padding:4px; min-width:140px;">
+          <input type="text" value="${escAttr(inStr)}" placeholder="Inputs (séparés par virgule)..." oninput="updatePmgGridCell(${idx}, 'inputs', this.value)" style="width:100%; height:28px; font-size:11px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-primary); color:#1e40af; padding:2px 6px;">
+        </td>
+        <td style="padding:4px; min-width:140px;">
+          <input type="text" value="${escAttr(outStr)}" placeholder="Outputs..." oninput="updatePmgGridCell(${idx}, 'outputs', this.value)" style="width:100%; height:28px; font-size:11px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-primary); color:#15803d; padding:2px 6px;">
+        </td>
+        <td style="padding:4px; width:120px;">
+          <select onchange="updatePmgGridCell(${idx}, 'realizationMode', this.value)" style="width:100%; height:28px; font-size:11px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-primary); color:var(--text-primary); padding:2px 4px;">
+            ${modeOptsHtml}
+          </select>
+        </td>
+        <td style="padding:4px; min-width:150px;">
+          <input type="text" value="${escAttr(act.applicableCase || '')}" placeholder="Condition..." oninput="updatePmgGridCell(${idx}, 'applicableCase', this.value)" style="width:100%; height:28px; font-size:11px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-primary); color:var(--text-primary); padding:2px 6px;">
+        </td>
+        <td style="padding:4px; min-width:160px;">
+          <input type="text" value="${escAttr(act.comment || '')}" placeholder="Documentation..." oninput="updatePmgGridCell(${idx}, 'comment', this.value)" style="width:100%; height:28px; font-size:11px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-primary); color:var(--text-secondary); padding:2px 6px;">
+        </td>
       </tr>
     `;
   });
 
-  html += `
+  const html = `
+    <div class="chart-card" style="padding:16px; margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div>
+          <h4 style="margin:0 0 4px; font-size:15px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+            🩻 Grille Rapide d'Édition Tableur (${activities.length} activités)
+          </h4>
+          <div style="font-size:12px; color:var(--text-secondary);">
+            Édition ultra-rapide type Excel : toutes vos modifications de texte, groupes, inputs et modes sont synchronisées en direct.
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="btn-ghost" style="padding:4px 10px; font-size:11px;" onclick="exportPmgExcel()">
+            📊 Exporter Excel (.xls)
+          </button>
+          <button class="btn-primary" style="padding:4px 12px; font-size:11px;" onclick="savePmgStateToLocalStorage(); alert('💾 Sauvegarde locale effectuée avec succès !');">
+            💾 Enregistrer
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tbl-wrap" style="max-height:560px; overflow:auto; border:1px solid var(--border-color); border-radius:var(--border-radius-md); background:var(--bg-card);">
+      <table style="width:100%; border-collapse:separate; border-spacing:0; font-size:11.5px;">
+        <thead style="position:sticky; top:0; z-index:5; background:#002060; color:#ffffff;">
+          <tr>
+            <th style="padding:8px 6px; width:45px; text-align:center;">#</th>
+            <th style="padding:8px 6px; min-width:180px; text-align:left;">Nom de l'Activité &amp; ID</th>
+            <th style="padding:8px 6px; width:110px;">Type BPMN</th>
+            <th style="padding:8px 6px; min-width:130px;">Entité / Lane</th>
+            <th style="padding:8px 6px; min-width:140px;">Groupe Utilisateur</th>
+            <th style="padding:8px 6px; min-width:140px;">Variables In</th>
+            <th style="padding:8px 6px; min-width:140px;">Variables Out</th>
+            <th style="padding:8px 6px; width:120px;">Mode</th>
+            <th style="padding:8px 6px; min-width:150px;">Applicable dans quel cas ?</th>
+            <th style="padding:8px 6px; min-width:160px;">Commentaire / Documentation</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
         </tbody>
       </table>
     </div>
@@ -5108,57 +7599,77 @@ window.renderPmgGlobalGridTable = function() {
 };
 
 window.updatePmgGridCell = function(index, field, value) {
-  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : window.pmgTempSubprocesses;
+  const activities = (window.pmgActivities && window.pmgActivities.length > 0)
+    ? window.pmgActivities
+    : (window.pmgTempSubprocesses || []);
+
   if (!activities || !activities[index]) return;
 
   const target = activities[index];
 
   if (field === 'inputs' || field === 'outputs') {
     target[field] = value ? value.split(',').map(v => v.trim()).filter(v => v) : [];
+  } else if (field === 'userGroup') {
+    target[field] = (typeof window.cleanPmgUserGroupName === 'function')
+      ? window.cleanPmgUserGroupName(value)
+      : value.trim();
   } else {
     target[field] = value.trim();
+  }
+
+  // Also sync in tempSubprocesses if activities is different
+  if (window.pmgTempSubprocesses && window.pmgTempSubprocesses[index]) {
+    window.pmgTempSubprocesses[index][field] = target[field];
   }
 
   window.savePmgStateToLocalStorage();
 };
 
-// =========================================================================
-// PMG SUBVIEW SWITCHER & CONTROLLER
-// =========================================================================
-
 window.switchPmgSubView = function(viewKey) {
-  const viewKeys = ['matrix', 'audit', 'raci', 'iocross', 'grid'];
+  const map = {
+    matrix: { btn: 'btnPmgSubViewMatrix', sec: 'pmgSubViewMatrix' },
+    flow: { btn: 'btnPmgSubViewFlow', sec: 'pmgSubViewFlow' },
+    sop: { btn: 'btnPmgSubViewSop', sec: 'pmgSubViewSop' },
+    devops: { btn: 'btnPmgSubViewDevops', sec: 'pmgSubViewDevops' },
+    audit: { btn: 'btnPmgSubViewAudit', sec: 'pmgSubViewAudit' },
+    raci: { btn: 'btnPmgSubViewRaci', sec: 'pmgSubViewRaci' },
+    iocross: { btn: 'btnPmgSubViewIoCross', sec: 'pmgSubViewIoCross' },
+    grid: { btn: 'btnPmgSubViewGrid', sec: 'pmgSubViewGrid' }
+  };
   
-  viewKeys.forEach(k => {
-    const btn = document.getElementById('btnPmgSubView' + k.charAt(0).toUpperCase() + k.slice(1));
-    const section = document.getElementById('pmgSubView' + k.charAt(0).toUpperCase() + k.slice(1));
+  Object.keys(map).forEach(k => {
+    const info = map[k];
+    const btn = document.getElementById(info.btn);
+    const sec = document.getElementById(info.sec);
     
     if (btn) {
       if (k === viewKey) btn.classList.add('active');
       else btn.classList.remove('active');
     }
     
-    if (section) {
-      section.style.display = (k === viewKey) ? 'block' : 'none';
+    if (sec) {
+      sec.style.display = (k === viewKey) ? 'block' : 'none';
     }
   });
 
   if (viewKey === 'matrix') {
     if (window.renderPmgMatrix) window.renderPmgMatrix();
+  } else if (viewKey === 'flow') {
+    if (window.renderPmgInteractiveFlow) window.renderPmgInteractiveFlow('pmgInteractiveFlowContainer');
+  } else if (viewKey === 'sop') {
+    if (window.renderPmgSop) window.renderPmgSop('pmgSopContainer');
+  } else if (viewKey === 'devops') {
+    if (window.renderPmgDevopsJira) window.renderPmgDevopsJira('pmgDevopsJiraContainer');
   } else if (viewKey === 'audit') {
-    window.renderPmgGovernanceAudit('pmgGovernanceAuditContainer');
+    if (window.renderPmgGovernanceAudit) window.renderPmgGovernanceAudit('pmgGovernanceAuditContainer');
   } else if (viewKey === 'raci') {
-    window.renderPmgRaciMatrix('pmgRaciContainer');
+    if (window.renderPmgRaciMatrix) window.renderPmgRaciMatrix('pmgRaciContainer');
   } else if (viewKey === 'iocross') {
-    window.renderPmgIoCrossMatrix('pmgIoCrossContainer');
+    if (window.renderPmgIoCrossMatrix) window.renderPmgIoCrossMatrix('pmgIoCrossContainer');
   } else if (viewKey === 'grid') {
-    window.renderPmgGlobalGridTable();
+    if (window.renderPmgGlobalGridTable) window.renderPmgGlobalGridTable('pmgMatrixGlobalGridContainer');
   }
 };
-
-// =========================================================================
-// FEATURE 1: ASSISTANT IA / SMART AUTO-FILL & HEURISTIC ENGINE
-// =========================================================================
 
 window.autoFillPmgMissingDoc = function() {
   const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
@@ -5626,142 +8137,500 @@ window.renderPmgRaciMatrix = function(containerId = 'pmgRaciContainer') {
 // FEATURE 4: MATRICE CROISÉE FLUX DE DONNÉES (I/O CROSS-TABLE)
 // =========================================================================
 
+window.pmgIoCrossState = window.pmgIoCrossState || {
+  search: '',
+  statusFilter: 'all',
+  processFilter: 'all',
+  viewMode: 'lineage', // 'lineage' or 'matrix'
+  page: 1,
+  pageSize: 25
+};
+
 window.renderPmgIoCrossMatrix = function(containerId = 'pmgIoCrossContainer') {
-  const container = document.getElementById(containerId);
+  let container = document.getElementById(containerId);
+  if (!container) container = document.getElementById('pmgIoCrossContainer');
   if (!container) return;
 
-  const activities = window.pmgActivities.length > 0 ? window.pmgActivities : (window.pmgTempSubprocesses || []);
+  const activities = (window.pmgActivities && window.pmgActivities.length > 0)
+    ? window.pmgActivities
+    : (window.pmgTempSubprocesses || []);
+
   if (activities.length === 0) {
-    container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-tertiary);">Chargez des processus BPMN pour afficher la matrice croisée des flux.</div>';
+    container.innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-tertiary);"><span style="font-size:32px;">🔄</span><br><br><strong>Aucune activité BPMN chargée</strong><br>Importez un ou plusieurs diagrammes BPMN pour explorer les flux I/O et la traçabilité des données.</div>';
     return;
   }
 
-  // 1. Collect all unique clean variables
-  const varSet = new Set();
-  activities.forEach(a => {
-    (a.inputs || []).forEach(v => { const n = getVarName(v); if (n) varSet.add(n); });
-    (a.outputs || []).forEach(v => { const n = getVarName(v); if (n) varSet.add(n); });
-  });
-  const variables = Array.from(varSet).sort();
-
-  if (variables.length === 0) {
-    container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-tertiary);">Aucune variable d\'entrée ou de sortie détectée dans le lot BPMN.</div>';
-    return;
+  function getCleanVar(str) {
+    if (!str) return '';
+    let s = String(str).trim();
+    if (s.startsWith('=')) s = s.substring(1).trim();
+    const idx = s.indexOf('(');
+    if (idx !== -1) s = s.substring(0, idx).trim();
+    if (s.includes('=')) s = s.split('=')[0].trim();
+    if (s.includes(':')) s = s.split(':')[0].trim();
+    s = s.replace(/^[="'\[]+|[="'\]]+$/g, '').trim();
+    return s;
   }
 
-  // 2. Identify Orphaned Variables (Produced but never consumed, or Consumed with no upstream producer)
-  const producersMap = new Map();
-  const consumersMap = new Map();
-
-  variables.forEach(v => {
-    producersMap.set(v, []);
-    consumersMap.set(v, []);
-  });
-
+  // 1. Collect all unique processes for filtering
+  const processNamesSet = new Set();
   activities.forEach(a => {
-    (a.inputs || []).forEach(inVar => {
-      const v = getVarName(inVar);
-      if (consumersMap.has(v)) consumersMap.get(v).push(a.name);
-    });
-    (a.outputs || []).forEach(outVar => {
-      const v = getVarName(outVar);
-      if (producersMap.has(v)) producersMap.get(v).push(a.name);
-    });
+    const p = a.parentProcessName || a.rootParentName;
+    if (p) processNamesSet.add(p);
   });
+  const allProcessNames = Array.from(processNamesSet).sort();
 
-  let neverConsumedCount = 0;
-  let noProducerCount = 0;
-  variables.forEach(v => {
-    if (producersMap.get(v).length > 0 && consumersMap.get(v).length === 0) neverConsumedCount++;
-    if (consumersMap.get(v).length > 0 && producersMap.get(v).length === 0) noProducerCount++;
-  });
+  // 2. Map all variables with their producers, consumers, and metadata
+  const varMap = new Map();
 
-  // 3. Build Table Headers
-  let headersHtml = `<th style="padding:8px; min-width:180px; text-align:left; position:sticky; left:0; background:#002060; z-index:2;">Activité (Ligne)</th>`;
-  variables.forEach(v => {
-    headersHtml += `<th style="padding:8px; min-width:100px; text-align:center; font-family:var(--font-mono, monospace); font-size:11px;">${escHtml(v)}</th>`;
-  });
-
-  // 4. Build Table Rows
-  let rowsHtml = '';
   activities.forEach(act => {
-    const inSet = new Set((act.inputs || []).map(getVarName));
-    const outSet = new Set((act.outputs || []).map(getVarName));
+    const parentProc = act.parentProcessName || act.rootParentName || 'Processus Principal';
+    const entity = act.entity || 'Non défini';
 
-    let cellsHtml = '';
-    variables.forEach(v => {
-      const isIn = inSet.has(v);
-      const isOut = outSet.has(v);
-
-      if (isIn && isOut) {
-        cellsHtml += `<td style="padding:6px; text-align:center;"><span class="pmg-cross-tag pmg-cross-tag-es" title="Entrée et Sortie (Transformateur)">E/S</span></td>`;
-      } else if (isOut) {
-        cellsHtml += `<td style="padding:6px; text-align:center;"><span class="pmg-cross-tag pmg-cross-tag-s" title="Sortie (Producteur)">🟢 Sortie</span></td>`;
-      } else if (isIn) {
-        cellsHtml += `<td style="padding:6px; text-align:center;"><span class="pmg-cross-tag pmg-cross-tag-e" title="Entrée (Consommateur)">🔵 Entrée</span></td>`;
-      } else {
-        cellsHtml += `<td style="padding:6px; text-align:center; color:#e2e8f0;">—</td>`;
+    (act.inputs || []).forEach(inVar => {
+      const v = getCleanVar(inVar);
+      if (!v) return;
+      if (!varMap.has(v)) {
+        varMap.set(v, {
+          name: v,
+          producers: [],
+          consumers: [],
+          producerProcs: new Set(),
+          consumerProcs: new Set(),
+          producerEntities: new Set(),
+          consumerEntities: new Set()
+        });
       }
+      const item = varMap.get(v);
+      item.consumers.push({ actName: act.name, actId: act.id, process: parentProc, entity: entity, type: act.type });
+      item.consumerProcs.add(parentProc);
+      item.consumerEntities.add(entity);
     });
 
-    rowsHtml += `
-      <tr style="border-bottom: 1px solid var(--border-color);">
-        <td style="padding:8px; position:sticky; left:0; background:var(--bg-card); font-weight:600; z-index:1; border-right:1px solid var(--border-color);">
-          ${escHtml(act.name)}
-          <br><span style="font-size:10px; color:var(--text-tertiary);">${escHtml(act.entity || '')}</span>
-        </td>
-        ${cellsHtml}
-      </tr>
-    `;
+    (act.outputs || []).forEach(outVar => {
+      const v = getCleanVar(outVar);
+      if (!v) return;
+      if (!varMap.has(v)) {
+        varMap.set(v, {
+          name: v,
+          producers: [],
+          consumers: [],
+          producerProcs: new Set(),
+          consumerProcs: new Set(),
+          producerEntities: new Set(),
+          consumerEntities: new Set()
+        });
+      }
+      const item = varMap.get(v);
+      item.producers.push({ actName: act.name, actId: act.id, process: parentProc, entity: entity, type: act.type });
+      item.producerProcs.add(parentProc);
+      item.producerEntities.add(entity);
+    });
   });
 
-  html = `
-    <!-- En-tête et Métriques -->
-    <div class="chart-card" style="padding:18px; margin-bottom:16px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-        <div>
-          <h4 style="margin:0 0 4px; font-size:15px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
-            🔄 Matrice Croisée Flux de Données &amp; Traçabilité Lignage (Producer-Consumer Matrix)
-          </h4>
-          <div style="font-size:12px; color:var(--text-secondary);">
-            Visualisez qui produit (🟢 Sortie) et qui consomme (🔵 Entrée) chaque variable pour éliminer les ruptures de flux.
+  const allVarsList = Array.from(varMap.values()).map(item => {
+    let status = 'complete';
+    let statusLabel = 'Complet (Produit & Consommé)';
+    let statusBadge = '<span style="background:rgba(16,185,129,0.12); color:#10b981; border:1px solid rgba(16,185,129,0.3); padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">✅ Flux Valide</span>';
+
+    const isInterProcess = item.producerProcs.size > 0 && item.consumerProcs.size > 0 &&
+      (Array.from(item.producerProcs).some(p => !item.consumerProcs.has(p)) || item.producerProcs.size > 1 || item.consumerProcs.size > 1);
+
+    if (item.producers.length === 0 && item.consumers.length > 0) {
+      status = 'no_producer';
+      statusLabel = 'Entrée Initiale (Sans producteur amont)';
+      statusBadge = '<span style="background:rgba(59,130,246,0.12); color:#2563eb; border:1px solid rgba(59,130,246,0.3); padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">📥 Entrée Initiale</span>';
+    } else if (item.producers.length > 0 && item.consumers.length === 0) {
+      status = 'dead_output';
+      statusLabel = 'Sortie Finale / Non relue';
+      statusBadge = '<span style="background:rgba(245,158,11,0.12); color:#d97706; border:1px solid rgba(245,158,11,0.3); padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">⚠️ Sortie Non Consommée</span>';
+    } else if (isInterProcess) {
+      status = 'inter_process';
+      statusLabel = 'Flux Inter-Processus';
+      statusBadge = '<span style="background:rgba(139,92,246,0.12); color:#7c3aed; border:1px solid rgba(139,92,246,0.3); padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700;">🔄 Inter-Processus</span>';
+    }
+
+    return {
+      ...item,
+      status,
+      statusLabel,
+      statusBadge,
+      isInterProcess
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+
+  // Global KPIs
+  const totalVars = allVarsList.length;
+  const noProducerCount = allVarsList.filter(v => v.status === 'no_producer').length;
+  const deadOutputCount = allVarsList.filter(v => v.status === 'dead_output').length;
+  const completeCount = allVarsList.filter(v => v.status === 'complete').length;
+  const interProcessCount = allVarsList.filter(v => v.isInterProcess).length;
+
+  // Apply filters
+  const state = window.pmgIoCrossState;
+  const searchLower = (state.search || '').toLowerCase().trim();
+
+  const filteredVars = allVarsList.filter(v => {
+    if (searchLower) {
+      const matchName = v.name.toLowerCase().includes(searchLower);
+      const matchProd = v.producers.some(p => p.actName.toLowerCase().includes(searchLower) || p.process.toLowerCase().includes(searchLower));
+      const matchCons = v.consumers.some(c => c.actName.toLowerCase().includes(searchLower) || c.process.toLowerCase().includes(searchLower));
+      if (!matchName && !matchProd && !matchCons) return false;
+    }
+
+    if (state.statusFilter !== 'all') {
+      if (state.statusFilter === 'inter_process') {
+        if (!v.isInterProcess) return false;
+      } else if (v.status !== state.statusFilter) {
+        return false;
+      }
+    }
+
+    if (state.processFilter !== 'all') {
+      const inProds = Array.from(v.producerProcs).includes(state.processFilter);
+      const inCons = Array.from(v.consumerProcs).includes(state.processFilter);
+      if (!inProds && !inCons) return false;
+    }
+
+    return true;
+  });
+
+  // Event handlers
+  window.onPmgIoCrossSearch = function(val) {
+    window.pmgIoCrossState.search = val;
+    window.pmgIoCrossState.page = 1;
+    window.renderPmgIoCrossMatrix(containerId);
+  };
+
+  window.setPmgIoCrossFilter = function(key, val) {
+    window.pmgIoCrossState[key] = val;
+    window.pmgIoCrossState.page = 1;
+    window.renderPmgIoCrossMatrix(containerId);
+  };
+
+  window.setPmgIoCrossViewMode = function(mode) {
+    window.pmgIoCrossState.viewMode = mode;
+    window.renderPmgIoCrossMatrix(containerId);
+  };
+
+  window.exportPmgIoCrossCSV = function() {
+    let csv = "\uFEFFVariable;Statut Lignage;Nb Producteurs;Producteurs (Activité [Processus]);Nb Consommateurs;Consommateurs (Activité [Processus]);Flux Inter-Processus\r\n";
+    filteredVars.forEach(v => {
+      const prodsStr = v.producers.map(p => `${p.actName} [${p.process}]`).join(' | ');
+      const consStr = v.consumers.map(c => `${c.actName} [${c.process}]`).join(' | ');
+      csv += `"${v.name}";"${v.statusLabel}";"${v.producers.length}";"${prodsStr}";"${v.consumers.length}";"${consStr}";"${v.isInterProcess ? 'OUI' : 'NON'}"\r\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `pmg_flux_io_lignage_${Date.now()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Pagination for Lineage View
+  const page = state.page || 1;
+  const pageSize = state.pageSize || 25;
+  const totalPages = Math.ceil(filteredVars.length / pageSize) || 1;
+  const pagedVars = filteredVars.slice((page - 1) * pageSize, page * pageSize);
+
+  // 3. Render HTML Sub-sections
+  let contentHtml = '';
+
+  if (state.viewMode === 'lineage') {
+    // -------------------------------------------------------------
+    // MODE 1 : VUE TRAÇABILITÉ & DICTIONNAIRE LIGNAGE (ULTRA CLAIR)
+    // -------------------------------------------------------------
+    if (filteredVars.length === 0) {
+      contentHtml = `
+        <div style="padding:40px; text-align:center; color:var(--text-tertiary); background:var(--bg-card); border-radius:8px; border:1px solid var(--border-color);">
+          <div style="font-size:28px; margin-bottom:8px;">🔍</div>
+          <strong>Aucune variable ne correspond aux critères de filtre.</strong>
+          <p style="margin:4px 0 0; font-size:12px;">Essayez de réinitialiser la recherche ou de changer les filtres de statut.</p>
+        </div>
+      `;
+    } else {
+      let rows = '';
+      pagedVars.forEach((v, vIdx) => {
+        const rowBg = vIdx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-hover)';
+
+        // Format Producers chips
+        let prodChips = '';
+        if (v.producers.length === 0) {
+          prodChips = '<span style="color:var(--text-tertiary); font-style:italic; font-size:11px;">Aucun producteur (Variable d\'entrée système ou utilisateur)</span>';
+        } else {
+          prodChips = v.producers.map(p => `
+            <div style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:4px 8px; margin-bottom:4px; font-size:11px; display:inline-block; margin-right:4px;">
+              <strong style="color:var(--text-primary);">${escHtml(p.actName)}</strong>
+              <div style="color:#009cd7; font-size:10px; margin-top:2px;">🏛️ ${escHtml(p.process)} ${p.entity !== 'Non défini' ? '&bull; 👤 ' + escHtml(p.entity) : ''}</div>
+            </div>
+          `).join('');
+        }
+
+        // Format Consumers chips
+        let consChips = '';
+        if (v.consumers.length === 0) {
+          consChips = '<span style="color:var(--warn); font-style:italic; font-size:11px;">Aucun consommateur direct dans ce lot de processus</span>';
+        } else {
+          consChips = v.consumers.map(c => `
+            <div style="background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25); border-radius:6px; padding:4px 8px; margin-bottom:4px; font-size:11px; display:inline-block; margin-right:4px;">
+              <strong style="color:var(--text-primary);">${escHtml(c.actName)}</strong>
+              <div style="color:#009cd7; font-size:10px; margin-top:2px;">🏛️ ${escHtml(c.process)} ${c.entity !== 'Non défini' ? '&bull; 👤 ' + escHtml(c.entity) : ''}</div>
+            </div>
+          `).join('');
+        }
+
+        // Flow diagram snippet
+        const flowId = `pmgFlowSnippet_${vIdx}`;
+
+        rows += `
+          <tr style="background:${rowBg}; border-bottom:1px solid var(--border-color); vertical-align:top;">
+            <td style="padding:10px 12px; font-family:var(--font-mono, monospace); font-weight:700; color:var(--text-primary); font-size:12px; width:220px; word-break:break-all;">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span style="color:#009cd7;">📦</span>
+                <span>${escHtml(v.name)}</span>
+              </div>
+            </td>
+            <td style="padding:10px 8px; width:170px; text-align:center;">
+              ${v.statusBadge}
+            </td>
+            <td style="padding:10px 12px; width:35%;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                <span style="font-size:10px; font-weight:700; color:#10b981; background:rgba(16,185,129,0.15); padding:1px 6px; border-radius:4px;">SORTIE / ÉCRITURE (${v.producers.length})</span>
+              </div>
+              <div>${prodChips}</div>
+            </td>
+            <td style="padding:10px 12px; width:35%;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                <span style="font-size:10px; font-weight:700; color:#3b82f6; background:rgba(59,130,246,0.15); padding:1px 6px; border-radius:4px;">ENTRÉE / LECTURE (${v.consumers.length})</span>
+              </div>
+              <div>${consChips}</div>
+            </td>
+          </tr>
+        `;
+      });
+
+      contentHtml = `
+        <div style="border:1px solid var(--border-color); border-radius:var(--border-radius-md); overflow:hidden; background:var(--bg-card); box-shadow:0 2px 8px rgba(0,0,0,0.04);">
+          <div style="overflow-x:auto;">
+            <table style="width:100%; font-size:12px; border-collapse:collapse;">
+              <thead>
+                <tr style="background:#002060; color:#fff;">
+                  <th style="padding:10px 12px; text-align:left; font-size:11.5px;">Variable BPMN</th>
+                  <th style="padding:10px 8px; text-align:center; font-size:11.5px;">Diagnostic Lignage</th>
+                  <th style="padding:10px 12px; text-align:left; font-size:11.5px;">Activités Productrices (Écritures / Outputs)</th>
+                  <th style="padding:10px 12px; text-align:left; font-size:11.5px;">Activités Consommatrices (Lectures / Inputs &amp; FEEL)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination Bar -->
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:var(--bg-card); border-top:1px solid var(--border-color); font-size:12px;">
+            <div style="color:var(--text-secondary);">
+              Affichage de <strong>${(page - 1) * pageSize + 1}</strong> à <strong>${Math.min(page * pageSize, filteredVars.length)}</strong> sur <strong>${filteredVars.length}</strong> variables
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <button class="btn-ghost" style="padding:3px 8px; font-size:11px;" ${page <= 1 ? 'disabled' : ''} onclick="window.pmgIoCrossState.page--; window.renderPmgIoCrossMatrix('${containerId}');">
+                &larr; Précédent
+              </button>
+              <span style="font-weight:700; color:var(--text-primary); padding:0 4px;">Page ${page} / ${totalPages}</span>
+              <button class="btn-ghost" style="padding:3px 8px; font-size:11px;" ${page >= totalPages ? 'disabled' : ''} onclick="window.pmgIoCrossState.page++; window.renderPmgIoCrossMatrix('${containerId}');">
+                Suivant &rarr;
+              </button>
+            </div>
           </div>
         </div>
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
-            Variables Uniques : <strong>${variables.length}</strong>
+      `;
+    }
+  } else {
+    // -------------------------------------------------------------
+    // MODE 2 : VUE MATRICE 2D AVEC SCROLLING ET COLONNES LISIBLES
+    // -------------------------------------------------------------
+    // Limit to max 30 variables at a time in 2D grid to keep it ultra-readable and performant
+    const matrixVars = filteredVars.slice(0, 30);
+    const hasMore = filteredVars.length > 30;
+
+    let headersHtml = '<th style="padding:10px 12px; min-width:240px; max-width:280px; text-align:left; position:sticky; left:0; top:0; background:#002060; color:#fff; z-index:10; border-right:2px solid #001233;">Activité BPMN</th>';
+    matrixVars.forEach(v => {
+      headersHtml += `
+        <th style="padding:8px 10px; min-width:150px; max-width:180px; text-align:center; position:sticky; top:0; background:#002060; color:#fff; font-family:var(--font-mono, monospace); font-size:11px; z-index:5; border-left:1px solid rgba(255,255,255,0.15); word-break:break-word;">
+          <div style="font-weight:700; color:#fff;">${escHtml(v.name)}</div>
+          <div style="font-size:9.5px; opacity:0.8; font-weight:normal; margin-top:2px;">${v.producers.length} prod / ${v.consumers.length} cons</div>
+        </th>
+      `;
+    });
+
+    let matrixRowsHtml = '';
+    activities.forEach((act, actIdx) => {
+      const inSet = new Set((act.inputs || []).map(getCleanVar));
+      const outSet = new Set((act.outputs || []).map(getCleanVar));
+      const parentProc = act.parentProcessName || act.rootParentName || 'Processus';
+
+      // Check if activity is related to any of the displayed matrixVars
+      const isRelevant = matrixVars.some(v => inSet.has(v.name) || outSet.has(v.name));
+      if (!isRelevant && matrixVars.length > 0 && state.search) return; // skip unrelated in search
+
+      let cells = '';
+      matrixVars.forEach(v => {
+        const isIn = inSet.has(v.name);
+        const isOut = outSet.has(v.name);
+
+        if (isIn && isOut) {
+          cells += '<td style="padding:6px; text-align:center; background:rgba(99,102,241,0.08); border-left:1px solid var(--border-color);"><span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; background:#6366f1; color:#fff;" title="Transformateur (Reçoit et Produit)">🟣 E/S</span></td>';
+        } else if (isOut) {
+          cells += '<td style="padding:6px; text-align:center; background:rgba(16,185,129,0.08); border-left:1px solid var(--border-color);"><span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:10px; background:#10b981; color:#fff;" title="Producteur (Sortie)">🟢 Sortie</span></td>';
+        } else if (isIn) {
+          cells += '<td style="padding:6px; text-align:center; background:rgba(59,130,246,0.08); border-left:1px solid var(--border-color);"><span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:10px; background:#3b82f6; color:#fff;" title="Consommateur (Entrée)">🔵 Entrée</span></td>';
+        } else {
+          cells += '<td style="padding:6px; text-align:center; color:var(--text-tertiary); opacity:0.3; border-left:1px solid var(--border-color);">&mdash;</td>';
+        }
+      });
+
+      matrixRowsHtml += `
+        <tr style="border-bottom:1px solid var(--border-color);">
+          <td style="padding:8px 12px; position:sticky; left:0; background:var(--bg-card); font-weight:600; z-index:2; border-right:2px solid var(--border-color); min-width:240px; max-width:280px;">
+            <div style="font-size:11.5px; color:var(--text-primary); font-weight:700;">${escHtml(act.name)}</div>
+            <div style="font-size:10px; color:var(--text-tertiary); margin-top:2px;">
+              🏛️ <strong style="color:#009cd7;">${escHtml(parentProc)}</strong> &bull; ${escHtml(act.entity || '')}
+            </div>
+          </td>
+          ${cells}
+        </tr>
+      `;
+    });
+
+    contentHtml = `
+      <div style="border:1px solid var(--border-color); border-radius:var(--border-radius-md); overflow:hidden; background:var(--bg-card);">
+        ${hasMore ? `
+          <div style="background:#FEF3C7; color:#92400E; padding:8px 12px; font-size:11.5px; font-weight:600; border-bottom:1px solid #FDE68A; display:flex; align-items:center; justify-content:space-between;">
+            <span>ℹ️ Affichage des 30 premières variables sur ${filteredVars.length}. Utilisez le filtre de recherche ci-dessus pour cibler des variables spécifiques.</span>
+            <button class="btn-ghost" style="padding:2px 8px; font-size:11px; background:#fff;" onclick="window.setPmgIoCrossViewMode('lineage')">Basculer en Vue Lignage Complète</button>
           </div>
-          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
-            ⚠️ Non consommées : <strong style="color:${neverConsumedCount > 0 ? 'var(--warn)' : 'var(--ok)'};">${neverConsumedCount}</strong>
+        ` : ''}
+        <div style="max-height:560px; overflow:auto;">
+          <table style="width:max-content; min-width:100%; font-size:11.5px; border-collapse:separate; border-spacing:0;">
+            <thead>
+              <tr>${headersHtml}</tr>
+            </thead>
+            <tbody>
+              ${matrixRowsHtml}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  // 4. Overall Layout Construction
+  const html = `
+    <!-- KPI Header Banner -->
+    <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--border-radius-md); padding:16px 20px; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
+        <div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:36px; height:36px; border-radius:8px; background:rgba(0,156,215,0.12); display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--brand-primary);">
+              🔄
+            </div>
+            <div>
+              <h3 style="margin:0; font-size:16px; font-weight:700; color:var(--text-primary);">
+                Traçabilité des Flux I/O &amp; Lignage des Variables
+              </h3>
+              <p style="margin:2px 0 0; font-size:12px; color:var(--text-secondary);">
+                Cartographie complète des échanges de données entre activités et sous-processus BPMN.
+              </p>
+            </div>
           </div>
-          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
-            📥 Entrées initiales : <strong>${noProducerCount}</strong>
+        </div>
+
+        <!-- KPI Badges -->
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:8px; border:1px solid var(--border-color); text-align:center;">
+            <div style="font-size:10px; text-transform:uppercase; color:var(--text-tertiary); font-weight:700;">Total Variables</div>
+            <div style="font-size:16px; font-weight:800; color:var(--text-primary);">${totalVars}</div>
+          </div>
+          <div style="background:rgba(16,185,129,0.06); padding:6px 12px; border-radius:8px; border:1px solid rgba(16,185,129,0.25); text-align:center;">
+            <div style="font-size:10px; text-transform:uppercase; color:#10b981; font-weight:700;">✅ Flux Valides</div>
+            <div style="font-size:16px; font-weight:800; color:#10b981;">${completeCount}</div>
+          </div>
+          <div style="background:rgba(59,130,246,0.06); padding:6px 12px; border-radius:8px; border:1px solid rgba(59,130,246,0.25); text-align:center;">
+            <div style="font-size:10px; text-transform:uppercase; color:#2563eb; font-weight:700;">📥 Entrées Initiales</div>
+            <div style="font-size:16px; font-weight:800; color:#2563eb;">${noProducerCount}</div>
+          </div>
+          <div style="background:rgba(245,158,11,0.06); padding:6px 12px; border-radius:8px; border:1px solid rgba(245,158,11,0.25); text-align:center;">
+            <div style="font-size:10px; text-transform:uppercase; color:#d97706; font-weight:700;">⚠️ Sorties Non Lues</div>
+            <div style="font-size:16px; font-weight:800; color:#d97706;">${deadOutputCount}</div>
+          </div>
+          <div style="background:rgba(139,92,246,0.06); padding:6px 12px; border-radius:8px; border:1px solid rgba(139,92,246,0.25); text-align:center;">
+            <div style="font-size:10px; text-transform:uppercase; color:#7c3aed; font-weight:700;">🔄 Inter-Processus</div>
+            <div style="font-size:16px; font-weight:800; color:#7c3aed;">${interProcessCount}</div>
           </div>
         </div>
       </div>
+
+      <!-- Advanced Filter & Search Bar -->
+      <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border-color); display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <!-- Search -->
+        <div style="position:relative; flex:1; min-width:220px;">
+          <input type="text"
+            class="srch"
+            placeholder="🔍 Filtrer par nom de variable, activité, processus..."
+            value="${escHtml(state.search)}"
+            oninput="window.onPmgIoCrossSearch(this.value)"
+            style="width:100%; height:36px; font-size:12px; padding-left:12px; border-radius:6px;">
+        </div>
+
+        <!-- Filter Statut -->
+        <select class="srch"
+          onchange="window.setPmgIoCrossFilter('statusFilter', this.value)"
+          style="height:36px; font-size:12px; min-width:180px; border-radius:6px;">
+          <option value="all" ${state.statusFilter === 'all' ? 'selected' : ''}>🎯 Tous les statuts (${totalVars})</option>
+          <option value="complete" ${state.statusFilter === 'complete' ? 'selected' : ''}>✅ Flux Valides (${completeCount})</option>
+          <option value="no_producer" ${state.statusFilter === 'no_producer' ? 'selected' : ''}>📥 Entrées Initiales (${noProducerCount})</option>
+          <option value="dead_output" ${state.statusFilter === 'dead_output' ? 'selected' : ''}>⚠️ Sorties Non Relues (${deadOutputCount})</option>
+          <option value="inter_process" ${state.statusFilter === 'inter_process' ? 'selected' : ''}>🔄 Inter-Processus (${interProcessCount})</option>
+        </select>
+
+        <!-- Filter Process -->
+        <select class="srch"
+          onchange="window.setPmgIoCrossFilter('processFilter', this.value)"
+          style="height:36px; font-size:12px; min-width:180px; border-radius:6px;">
+          <option value="all" ${state.processFilter === 'all' ? 'selected' : ''}>🏛️ Tous les Processus Parent</option>
+          ${allProcessNames.map(p => `<option value="${escHtml(p)}" ${state.processFilter === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
+        </select>
+
+        <!-- View Switcher (Lineage Cards vs 2D Matrix) -->
+        <div style="display:flex; border:1px solid var(--border-color); border-radius:6px; overflow:hidden; height:36px;">
+          <button style="padding:0 12px; font-size:11.5px; font-weight:700; border:none; cursor:pointer; background:${state.viewMode === 'lineage' ? 'var(--brand-primary)' : 'var(--bg-hover)'}; color:${state.viewMode === 'lineage' ? '#fff' : 'var(--text-primary)'};"
+            onclick="window.setPmgIoCrossViewMode('lineage')">
+            📋 Vue Dictionnaire &amp; Lignage
+          </button>
+          <button style="padding:0 12px; font-size:11.5px; font-weight:700; border:none; border-left:1px solid var(--border-color); cursor:pointer; background:${state.viewMode === 'matrix' ? 'var(--brand-primary)' : 'var(--bg-hover)'}; color:${state.viewMode === 'matrix' ? '#fff' : 'var(--text-primary)'};"
+            onclick="window.setPmgIoCrossViewMode('matrix')">
+            🎯 Matrice Croisée 2D
+          </button>
+        </div>
+
+        <!-- Export CSV Button -->
+        <button class="btn-ghost"
+          style="height:36px; padding:0 12px; font-size:11.5px; font-weight:700; border-radius:6px;"
+          onclick="window.exportPmgIoCrossCSV()">
+          📥 Exporter Lignage CSV
+        </button>
+      </div>
     </div>
 
-    <!-- Tableau Croisé -->
-    <div class="tbl-wrap" style="max-height:480px; overflow:auto; border:1px solid var(--border-color); border-radius:var(--border-radius-md);">
-      <table style="width:100%; font-size:11.5px; border-collapse:collapse;">
-        <thead>
-          <tr style="background:#002060; color:#ffffff;">
-            ${headersHtml}
-          </tr>
-        </thead>
-        <tbody>
-          ${rowsHtml}
-        </tbody>
-      </table>
-    </div>
+    <!-- Main Content Area -->
+    ${contentHtml}
   `;
 
   container.innerHTML = html;
 };
 
-// =========================================================================
-// FEATURE 5: EXPORT MULTI-FEUILLES EXCEL PRO (.XLSX) BOUYGUES TELECOM
-// =========================================================================
 
 window.exportPmgMultiSheetExcel = function() {
   if (typeof XLSX === 'undefined') {
@@ -5824,6 +8693,8 @@ window.exportPmgMultiSheetExcel = function() {
     ]);
   });
   const ws2 = XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(ws2Data) : ws2Data);
+  ws2['!autofilter'] = { ref: `A1:J${activities.length + 1}` };
+  ws2['!cols'] = [{ wch: 35 }, { wch: 25 }, { wch: 20 }, { wch: 25 }, { wch: 25 }, { wch: 30 }, { wch: 30 }, { wch: 20 }, { wch: 25 }, { wch: 40 }];
   XLSX.utils.book_append_sheet(wb, ws2, "2_Matrice_PMG_Officielle");
 
   // --- FEUILLE 3 : Matrice RACI ---
@@ -5845,6 +8716,8 @@ window.exportPmgMultiSheetExcel = function() {
     ws3Data.push(row);
   });
   const ws3 = XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(ws3Data) : ws3Data);
+  const lastColLetter = XLSX.utils.encode_col ? XLSX.utils.encode_col(ws3Header.length - 1) : 'Z';
+  ws3['!autofilter'] = { ref: `A1:${lastColLetter}${activities.length + 1}` };
   XLSX.utils.book_append_sheet(wb, ws3, "3_Matrice_RACI");
 
   // --- FEUILLE 4 : Dictionnaire & Lignage I/O ---
@@ -5878,9 +8751,1224 @@ window.exportPmgMultiSheetExcel = function() {
     ]);
   });
   const ws4 = XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(ws4Data) : ws4Data);
+  ws4['!autofilter'] = { ref: `A1:D${varMap.size + 1}` };
+  ws4['!cols'] = [{ wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 30 }];
   XLSX.utils.book_append_sheet(wb, ws4, "4_Dictionnaire_Variables_IO");
 
   // Write and download .xlsx
   XLSX.writeFile(wb, `pmg_gouvernance_${processId || 'process'}.xlsx`);
 };
+
+// =========================================================================
+// FEATURE 6: DIAGRAMMES & FLUX INTERACTIFS (INTERACTIVE FLOW & VISUALS)
+// =========================================================================
+
+window.pmgFlowActiveTab = window.pmgFlowActiveTab || 'treeflow';
+
+window.renderPmgInteractiveFlow = function(containerId = 'pmgInteractiveFlowContainer') {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const activities = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || window.pmgTempSubprocesses || []);
+
+  if (!activities || activities.length === 0) {
+    container.innerHTML = '<div style="padding:30px; text-align:center; color:var(--text-tertiary); font-size:13px;">Chargez des fichiers BPMN pour visualiser les diagrammes de flux interactifs.</div>';
+    return;
+  }
+
+  const activeTab = window.pmgFlowActiveTab || 'treeflow';
+
+  const userTasksCount = activities.filter(a => (a.type || '').toLowerCase().includes('user')).length;
+  const callActsCount = activities.filter(a => (a.type || '').toLowerCase().includes('call') || (a.type || '').toLowerCase().includes('sous')).length;
+  const autoTasksCount = activities.filter(a => (a.type || '').toLowerCase().includes('service') || (a.type || '').toLowerCase().includes('script')).length;
+  const maxLevel = activities.length > 0 ? Math.max(...activities.map(a => a.level || 1)) : 1;
+
+  let tabContentHtml = '';
+  if (activeTab === 'treeflow') {
+    tabContentHtml = renderPmgTreeFlowContent(activities);
+  } else if (activeTab === 'dataflow') {
+    tabContentHtml = renderPmgDataFlowContent(activities);
+  } else if (activeTab === 'journey') {
+    tabContentHtml = renderPmgHumanJourneyContent(activities);
+  }
+
+  container.innerHTML = `
+    <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--border-radius-md); padding:18px; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h4 style="margin:0 0 4px; font-size:16px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+            🗺️ Visualisations &amp; Diagrammes de Flux Interactifs
+          </h4>
+          <div style="font-size:12px; color:var(--text-secondary);">
+            Explorez la cartographie sous forme de flow-chart visuel, analysez les transferts de données inter-entités et suivez le parcours opérateur.
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
+            Total Nœuds : <strong style="color:var(--brand-primary);">${activities.length}</strong>
+          </div>
+          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
+            Profondeur : <strong>Niveau ${maxLevel}</strong>
+          </div>
+          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
+            👤 Opérateurs : <strong style="color:#ea5b0c;">${userTasksCount}</strong>
+          </div>
+          <div style="background:var(--bg-hover); padding:6px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
+            🤖 Automatisations : <strong style="color:var(--ok);">${autoTasksCount + callActsCount}</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- Onglets internes Flow -->
+      <div style="display:flex; gap:8px; margin-top:16px; border-bottom:1px solid var(--border-color); padding-bottom:8px; flex-wrap:wrap;">
+        <button class="btn-ghost" style="${activeTab === 'treeflow' ? 'background:rgba(0,156,215,0.15); color:var(--brand-primary); font-weight:700; border-color:var(--brand-primary);' : ''} padding:6px 14px; font-size:12px;" onclick="switchPmgFlowTab('treeflow')">
+          🗺️ Flow Chart Hiérarchique
+        </button>
+        <button class="btn-ghost" style="${activeTab === 'dataflow' ? 'background:rgba(0,156,215,0.15); color:var(--brand-primary); font-weight:700; border-color:var(--brand-primary);' : ''} padding:6px 14px; font-size:12px;" onclick="switchPmgFlowTab('dataflow')">
+          🔀 Flux de Données Inter-Entités (Lanes)
+        </button>
+        <button class="btn-ghost" style="${activeTab === 'journey' ? 'background:rgba(0,156,215,0.15); color:var(--brand-primary); font-weight:700; border-color:var(--brand-primary);' : ''} padding:6px 14px; font-size:12px;" onclick="switchPmgFlowTab('journey')">
+          👤 Parcours Opérateur (User Tasks &amp; Formulaires)
+        </button>
+      </div>
+    </div>
+
+    <!-- Conteneur d'affichage de l'onglet actif -->
+    <div id="pmgFlowTabContent">
+      ${tabContentHtml}
+    </div>
+  `;
+};
+
+window.switchPmgFlowTab = function(tabKey) {
+  window.pmgFlowActiveTab = tabKey;
+  window.renderPmgInteractiveFlow('pmgInteractiveFlowContainer');
+};
+
+function renderPmgTreeFlowContent(activities) {
+  // Group activities by level or parent
+  const levelsMap = new Map();
+  activities.forEach(act => {
+    const lvl = act.level || 1;
+    if (!levelsMap.has(lvl)) levelsMap.set(lvl, []);
+    levelsMap.get(lvl).push(act);
+  });
+
+  const sortedLevels = Array.from(levelsMap.keys()).sort((a, b) => a - b);
+
+  let levelsHtml = '';
+  sortedLevels.forEach(lvl => {
+    const lvlActs = levelsMap.get(lvl);
+    const lvlColors = ['#3b82f6', '#06b6d4', '#f59e0b', '#8b5cf6', '#ec4899', '#ef4444', '#10b981'];
+    const curColor = lvlColors[(lvl - 1) % lvlColors.length];
+
+    let cardsHtml = '';
+    lvlActs.forEach(act => {
+      const typeKey = window.getPmgTypeKey(act.type || act.typeLabel);
+      const meta = PMG_TYPE_META[typeKey] || { label: act.type || 'Task', icon: '📄', color: '#64748b' };
+      const isSub = (act.type || '').toLowerCase().includes('call') || (act.type || '').toLowerCase().includes('sous');
+      const safeId = act.id || '';
+
+      cardsHtml += `
+        <div class="pmg-flow-card" onclick="openPmgActivityInspector('${escAttr(safeId)}')" style="flex:1 1 280px; max-width:340px; background:var(--bg-card); border:1px solid var(--border-color); border-top:3px solid ${meta.color}; border-radius:8px; padding:12px; cursor:pointer; transition:all 0.2s ease; box-shadow:var(--shadow-sm); position:relative;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+            <span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:10px; background:${meta.color}22; color:${meta.color}; border:1px solid ${meta.color}44;">
+              ${meta.icon} ${meta.label}
+            </span>
+            <span style="font-size:10px; color:var(--text-tertiary); font-family:var(--font-mono, monospace);">
+              ${escHtml(act.id)}
+            </span>
+          </div>
+          <div style="font-weight:700; font-size:13px; color:var(--text-primary); margin-bottom:6px; line-height:1.3;">
+            ${escHtml(act.name)}
+          </div>
+          ${act.entity ? `<div style="font-size:11px; color:var(--text-secondary); margin-bottom:6px; display:flex; align-items:center; gap:4px;">🏢 <span>${escHtml(act.entity)}</span></div>` : ''}
+          ${act.userGroup ? `<div style="font-size:11px; color:#ea5b0c; font-weight:600; margin-bottom:6px; display:flex; align-items:center; gap:4px;">👥 <span>${escHtml(act.userGroup)}</span></div>` : ''}
+          
+          <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px dashed var(--border-color); padding-top:8px; margin-top:8px; font-size:10.5px; color:var(--text-tertiary);">
+            <span>📥 Inputs : <strong>${(act.inputs || []).length}</strong></span>
+            <span>📤 Outputs : <strong>${(act.outputs || []).length}</strong></span>
+            <span style="color:var(--brand-primary); font-weight:600;">Détails ➔</span>
+          </div>
+        </div>
+      `;
+    });
+
+    levelsHtml += `
+      <div style="margin-bottom:20px; background:rgba(255,255,255,0.01); border:1px solid var(--border-color); border-radius:10px; padding:14px 16px;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+          <span style="background:${curColor}22; color:${curColor}; border:1px solid ${curColor}55; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;">
+            Niveau Hiérarchique ${lvl}
+          </span>
+          <span style="font-size:12px; color:var(--text-secondary);">
+            (${lvlActs.length} activité${lvlActs.length > 1 ? 's' : ''})
+          </span>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:12px;">
+          ${cardsHtml}
+        </div>
+      </div>
+    `;
+  });
+
+  return `
+    <div style="margin-bottom:12px; font-size:12px; color:var(--text-secondary); display:flex; justify-content:space-between; align-items:center;">
+      <span>💡 Cliquez sur n'importe quel bloc d'activité pour inspecter ses variables I/O, règles et détails complets.</span>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      ${levelsHtml}
+    </div>
+    <div id="pmgActivityInspectorModalContainer"></div>
+  `;
+}
+
+function renderPmgDataFlowContent(activities) {
+  // Compute entity-to-entity data exchanges
+  const entityMap = new Map();
+  activities.forEach(a => {
+    const ent = a.entity || 'Direction Non Spécifiée';
+    if (!entityMap.has(ent)) {
+      entityMap.set(ent, { produced: new Set(), consumed: new Set(), activities: [] });
+    }
+    const data = entityMap.get(ent);
+    data.activities.push(a.name);
+    (a.outputs || []).forEach(v => { const n = getVarName(v); if (n) data.produced.add(n); });
+    (a.inputs || []).forEach(v => { const n = getVarName(v); if (n) data.consumed.add(n); });
+  });
+
+  const entities = Array.from(entityMap.keys());
+
+  let cardsHtml = '';
+  entities.forEach(ent => {
+    const d = entityMap.get(ent);
+    const producedList = Array.from(d.produced);
+    const consumedList = Array.from(d.consumed);
+
+    cardsHtml += `
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:14px; margin-bottom:12px; box-shadow:var(--shadow-sm);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <div style="font-weight:700; font-size:14px; color:var(--brand-primary); display:flex; align-items:center; gap:6px;">
+            🏢 ${escHtml(ent)}
+          </div>
+          <span style="font-size:11px; padding:2px 8px; border-radius:10px; background:var(--bg-hover); border:1px solid var(--border-color); color:var(--text-secondary);">
+            ${d.activities.length} activité${d.activities.length > 1 ? 's' : ''}
+          </span>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div style="background:rgba(16,185,129,0.06); border:1px solid rgba(16,185,129,0.2); border-radius:6px; padding:10px;">
+            <div style="font-size:11px; font-weight:700; color:var(--ok); margin-bottom:6px;">📤 Données Produites (${producedList.length}) :</div>
+            <div style="font-size:11px; font-family:var(--font-mono, monospace); max-height:90px; overflow-y:auto;">
+              ${producedList.length > 0 ? producedList.map(v => `<span style="display:inline-block; margin:2px; padding:2px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:var(--ok);">${escHtml(v)}</span>`).join('') : '<span style="color:#94a3b8;">Aucune donnée produite</span>'}
+            </div>
+          </div>
+          <div style="background:rgba(59,130,246,0.06); border:1px solid rgba(59,130,246,0.2); border-radius:6px; padding:10px;">
+            <div style="font-size:11px; font-weight:700; color:var(--brand-primary); margin-bottom:6px;">📥 Données Consommées (${consumedList.length}) :</div>
+            <div style="font-size:11px; font-family:var(--font-mono, monospace); max-height:90px; overflow-y:auto;">
+              ${consumedList.length > 0 ? consumedList.map(v => `<span style="display:inline-block; margin:2px; padding:2px 6px; border-radius:4px; background:rgba(59,130,246,0.15); color:var(--brand-primary);">${escHtml(v)}</span>`).join('') : '<span style="color:#94a3b8;">Aucune donnée requise</span>'}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+
+  return `
+    <div style="margin-bottom:12px; font-size:12px; color:var(--text-secondary);">
+      Traçabilité complète des données échangées entre chaque Entité / Lane du processus BPMN.
+    </div>
+    ${cardsHtml}
+  `;
+}
+
+function renderPmgHumanJourneyContent(activities) {
+  const humanTasks = activities.filter(a => {
+    const t = (a.type || '').toLowerCase();
+    return t.includes('user') || t.includes('manual');
+  });
+
+  if (humanTasks.length === 0) {
+    return '<div style="padding:25px; text-align:center; color:var(--text-tertiary); font-size:12.5px;">Aucune tâche utilisateur humaine (User Task / Manual Task) n\'est présente dans la sélection active.</div>';
+  }
+
+  let stepsHtml = '';
+  humanTasks.forEach((act, idx) => {
+    const inputsList = (act.inputs || []).map(getVarName).filter(Boolean);
+    const outputsList = (act.outputs || []).map(getVarName).filter(Boolean);
+
+    stepsHtml += `
+      <div style="display:flex; gap:14px; margin-bottom:14px; position:relative;">
+        <div style="display:flex; flex-direction:column; align-items:center;">
+          <div style="width:30px; height:30px; border-radius:50%; background:#ea5b0c; color:#ffffff; font-weight:700; font-size:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            ${idx + 1}
+          </div>
+          ${idx < humanTasks.length - 1 ? '<div style="width:2px; flex-grow:1; background:var(--border-color); margin-top:4px;"></div>' : ''}
+        </div>
+        <div style="flex-grow:1; background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:14px; box-shadow:var(--shadow-sm);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+            <div>
+              <div style="font-weight:700; font-size:14px; color:var(--text-primary); margin-bottom:4px;">
+                👤 ${escHtml(act.name)}
+              </div>
+              <div style="font-size:11px; color:var(--text-tertiary); font-family:var(--font-mono, monospace);">
+                id: ${escHtml(act.id)} | Type: ${escHtml(act.typeLabel || act.type)}
+              </div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
+              ${act.entity ? `<span style="font-size:11px; padding:2px 8px; border-radius:6px; background:rgba(0,156,215,0.1); color:#009cd7; border:1px solid rgba(0,156,215,0.25); font-weight:600;">🏢 ${escHtml(act.entity)}</span>` : ''}
+              ${act.userGroup ? `<span style="font-size:11px; padding:2px 8px; border-radius:6px; background:rgba(234,91,12,0.1); color:#ea5b0c; border:1px solid rgba(234,91,12,0.25); font-weight:600;">👥 ${escHtml(act.userGroup)}</span>` : '<span style="font-size:11px; padding:2px 8px; border-radius:6px; background:rgba(239,68,68,0.1); color:#ef4444; border:1px solid rgba(239,68,68,0.25); font-weight:600;">⚠️ Sans groupe</span>'}
+            </div>
+          </div>
+
+          <div style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:11.5px;">
+            <div style="background:var(--bg-hover); padding:8px 10px; border-radius:6px;">
+              <span style="font-weight:600; color:var(--text-secondary);">Champs requis à la saisie (Inputs) :</span>
+              <div style="margin-top:4px; font-family:var(--font-mono, monospace); color:var(--text-primary);">
+                ${inputsList.length > 0 ? inputsList.join(', ') : '<em>Aucun champ requis</em>'}
+              </div>
+            </div>
+            <div style="background:var(--bg-hover); padding:8px 10px; border-radius:6px;">
+              <span style="font-weight:600; color:var(--text-secondary);">Résultats validés (Outputs) :</span>
+              <div style="margin-top:4px; font-family:var(--font-mono, monospace); color:var(--ok); font-weight:600;">
+                ${outputsList.length > 0 ? outputsList.join(', ') : '<em>Aucune variable produite</em>'}
+              </div>
+            </div>
+          </div>
+
+          ${act.applicableCase ? `
+            <div style="margin-top:8px; font-size:11.5px; color:var(--text-secondary);">
+              <strong>Condition de déclenchement :</strong> <code>${escHtml(act.applicableCase)}</code>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  });
+
+  return `
+    <div style="margin-bottom:14px; font-size:12px; color:var(--text-secondary);">
+      Chronologie complète des interactions et formulaires nécessitant l'intervention d'opérateurs humains.
+    </div>
+    ${stepsHtml}
+  `;
+}
+
+window.openPmgActivityInspector = function(actId) {
+  const acts = window.pmgActivities || window.pmgTempSubprocesses || [];
+  const act = acts.find(a => (a.id || '').toLowerCase() === (actId || '').toLowerCase());
+  if (!act) return;
+
+  const container = document.getElementById('pmgActivityInspectorModalContainer');
+  if (!container) return;
+
+  const typeKey = window.getPmgTypeKey(act.type || act.typeLabel);
+  const meta = PMG_TYPE_META[typeKey] || { label: act.type, icon: '📄', color: '#64748b' };
+
+  container.innerHTML = `
+    <div style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.5); z-index:9999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(3px);">
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; width:90%; max-width:650px; max-height:85vh; overflow-y:auto; box-shadow:0 20px 40px rgba(0,0,0,0.3); padding:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:12px;">
+          <div>
+            <span style="font-size:11px; padding:3px 8px; border-radius:10px; background:${meta.color}22; color:${meta.color}; border:1px solid ${meta.color}44; font-weight:700;">
+              ${meta.icon} ${meta.label}
+            </span>
+            <h3 style="margin:8px 0 2px; font-size:17px; color:var(--text-primary); font-weight:700;">
+              ${escHtml(act.name)}
+            </h3>
+            <div style="font-family:var(--font-mono, monospace); font-size:11px; color:var(--text-tertiary);">
+              ID Technique : ${escHtml(act.id)} | Niveau : ${act.level || 1}
+            </div>
+          </div>
+          <button class="btn-ghost" onclick="document.getElementById('pmgActivityInspectorModalContainer').innerHTML=''" style="font-size:16px; width:32px; height:32px; padding:0; line-height:30px;">✕</button>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:12px; font-size:12.5px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div style="background:var(--bg-hover); padding:10px; border-radius:8px;">
+              <strong>🏢 Entité / Lane :</strong>
+              <div style="margin-top:2px; color:var(--text-primary);">${escHtml(act.entity || 'Non spécifiée')}</div>
+            </div>
+            <div style="background:var(--bg-hover); padding:10px; border-radius:8px;">
+              <strong>👥 Groupe Assigné :</strong>
+              <div style="margin-top:2px; color:#ea5b0c; font-weight:600;">${escHtml(act.userGroup || 'Non assigné')}</div>
+            </div>
+          </div>
+
+          <div style="background:rgba(59,130,246,0.06); border:1px solid rgba(59,130,246,0.2); border-radius:8px; padding:12px;">
+            <strong style="color:var(--brand-primary);">📥 Variables d'Entrée (Inputs) :</strong>
+            <div style="margin-top:6px; font-family:var(--font-mono, monospace); font-size:11.5px;">
+              ${(act.inputs && act.inputs.length > 0) ? act.inputs.map(i => `<span style="display:inline-block; margin:2px; padding:2px 6px; border-radius:4px; background:rgba(59,130,246,0.15);">${escHtml(i)}</span>`).join('') : '<span style="color:#94a3b8;">Aucun paramètre d\'entrée</span>'}
+            </div>
+          </div>
+
+          <div style="background:rgba(16,185,129,0.06); border:1px solid rgba(16,185,129,0.2); border-radius:8px; padding:12px;">
+            <strong style="color:var(--ok);">📤 Variables Produites (Outputs) :</strong>
+            <div style="margin-top:6px; font-family:var(--font-mono, monospace); font-size:11.5px;">
+              ${(act.outputs && act.outputs.length > 0) ? act.outputs.map(o => `<span style="display:inline-block; margin:2px; padding:2px 6px; border-radius:4px; background:rgba(16,185,129,0.15);">${escHtml(o)}</span>`).join('') : '<span style="color:#94a3b8;">Aucune variable produite</span>'}
+            </div>
+          </div>
+
+          <div style="background:var(--bg-hover); padding:10px; border-radius:8px;">
+            <strong>🎯 Cas d'applicabilité :</strong>
+            <div style="margin-top:4px; color:var(--text-secondary);">${escHtml(act.applicableCase || 'Applicable dans tous les cas par défaut.')}</div>
+          </div>
+
+          <div style="background:var(--bg-hover); padding:10px; border-radius:8px;">
+            <strong>📝 Commentaires / Spécification :</strong>
+            <div style="margin-top:4px; color:var(--text-secondary);">${escHtml(act.comment || 'Aucun commentaire.')}</div>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; margin-top:20px;">
+          <button class="btn-primary" onclick="document.getElementById('pmgActivityInspectorModalContainer').innerHTML=''">Fermer</button>
+        </div>
+      </div>
+    </div>
+  `;
+};
+
+// =========================================================================
+// FEATURE 7: DEVOPS, USER STORIES JIRA & TEST PAYLOADS GENERATOR
+// =========================================================================
+
+window.pmgDevopsActiveTab = window.pmgDevopsActiveTab || 'jira';
+
+window.renderPmgDevopsJira = function(containerId = 'pmgDevopsJiraContainer') {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const activities = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || window.pmgTempSubprocesses || []);
+
+  if (!activities || activities.length === 0) {
+    container.innerHTML = '<div style="padding:30px; text-align:center; color:var(--text-tertiary); font-size:13px;">Chargez des fichiers BPMN pour générer les spécifications Jira et les payloads de test.</div>';
+    return;
+  }
+
+  const activeTab = window.pmgDevopsActiveTab || 'jira';
+
+  let tabContentHtml = '';
+  if (activeTab === 'jira') {
+    tabContentHtml = renderPmgJiraStoriesContent(activities);
+  } else if (activeTab === 'payloads') {
+    tabContentHtml = renderPmgTestPayloadsContent(activities);
+  }
+
+  container.innerHTML = `
+    <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--border-radius-md); padding:18px; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h4 style="margin:0 0 4px; font-size:16px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+            🚀 Intégration Projet &amp; DevOps (Jira / Spécifications / Tests)
+          </h4>
+          <div style="font-size:12px; color:var(--text-secondary);">
+            Générez instantanément vos User Stories Jira, fiches de spécifications fonctionnelles (FDD) et payloads de test Zeebe / Postman.
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn-ghost" style="border:1px solid var(--ok); color:var(--ok); font-weight:700; font-size:11.5px; height:32px;" onclick="exportPmgJiraCSV()">
+            📥 Exporter CSV Jira (Bulk Import)
+          </button>
+          <button class="btn-ghost" style="border:1px solid var(--brand-primary); color:var(--brand-primary); font-weight:700; font-size:11.5px; height:32px;" onclick="exportPmgFddMarkdown()">
+            📑 Télécharger Cahier des Spécifications (.md)
+          </button>
+        </div>
+      </div>
+
+      <!-- Onglets internes DevOps -->
+      <div style="display:flex; gap:8px; margin-top:16px; border-bottom:1px solid var(--border-color); padding-bottom:8px; flex-wrap:wrap;">
+        <button class="btn-ghost" style="${activeTab === 'jira' ? 'background:rgba(0,156,215,0.15); color:var(--brand-primary); font-weight:700; border-color:var(--brand-primary);' : ''} padding:6px 14px; font-size:12px;" onclick="switchPmgDevopsTab('jira')">
+          📋 Générateur de User Stories Jira &amp; Confluence
+        </button>
+        <button class="btn-ghost" style="${activeTab === 'payloads' ? 'background:rgba(0,156,215,0.15); color:var(--brand-primary); font-weight:700; border-color:var(--brand-primary);' : ''} padding:6px 14px; font-size:12px;" onclick="switchPmgDevopsTab('payloads')">
+          🧪 Payloads de Test &amp; Mocks API (Zeebe / Postman)
+        </button>
+      </div>
+    </div>
+
+    <!-- Contenu de l'onglet -->
+    <div id="pmgDevopsTabContent">
+      ${tabContentHtml}
+    </div>
+  `;
+};
+
+window.switchPmgDevopsTab = function(tabKey) {
+  window.pmgDevopsActiveTab = tabKey;
+  window.renderPmgDevopsJira('pmgDevopsJiraContainer');
+};
+
+function generatePmgUserStoryText(act, format = 'markdown') {
+  const procName = document.getElementById('pmgProcessNameStep')?.value || window.pmgProcessDetails?.name || 'Processus';
+  const inputs = (act.inputs || []).map(getVarName).filter(Boolean);
+  const outputs = (act.outputs || []).map(getVarName).filter(Boolean);
+  const role = act.userGroup || act.entity || 'Opérateur Métier';
+
+  if (format === 'jira') {
+    return `h3. [US-BPMN] ${act.name} (${role})
+*Processus Parent :* ${procName}
+*ID Technique BPMN :* \`${act.id}\`
+*Type :* ${act.typeLabel || act.type}
+*Acteur Responsable :* ${role}
+
+h4. Description Fonctionnelle
+*En tant que* ${role},
+*Je souhaite* réaliser l'activité "${act.name}",
+*Afin de* produire les résultats : ${outputs.join(', ') || "Validation de l'étape"}.
+
+h4. Critères d'Acceptation (DoD)
+* [ ] Le formulaire / tâche est accessible aux habilités du groupe : *${role}*
+* [ ] Les données en entrée sont vérifiées : ${inputs.length > 0 ? inputs.map(i => `{{${i}}}`).join(', ') : 'Aucun prérequis'}
+* [ ] Les variables de sortie sont valorisées dans l'instance : ${outputs.length > 0 ? outputs.map(o => `{{${o}}}`).join(', ') : 'Validation standard'}
+${act.applicableCase ? `* [ ] Règle conditionnelle vérifiée : _${act.applicableCase}_` : ''}
+${act.comment ? `* [ ] Note métier : _${act.comment}_` : ''}`;
+  }
+
+  // Markdown format
+  return `### [US-BPMN] ${act.name} (${role})
+- **Processus Parent** : ${procName}
+- **ID Technique BPMN** : \`${act.id}\`
+- **Type** : ${act.typeLabel || act.type}
+- **Acteur Responsable** : ${role}
+
+#### 🎯 Description
+> **En tant que** ${role},  
+> **Je souhaite** réaliser l'étape "${act.name}",  
+> **Afin de** valoriser et produire : ${outputs.length > 0 ? outputs.map(o => `\`${o}\``).join(', ') : 'la validation du dossier'}.
+
+#### ✅ Critères d'Acceptation (Definition of Done)
+- [ ] Le formulaire est accessible pour le groupe **${role}**
+- [ ] Les paramètres d'entrée sont disponibles : ${inputs.length > 0 ? inputs.map(i => `\`${i}\``).join(', ') : '_Aucun prérequis_'}
+- [ ] Les variables de sortie suivantes sont générées : ${outputs.length > 0 ? outputs.map(o => `\`${o}\``).join(', ') : '_Validation standard_'}
+${act.applicableCase ? `- [ ] Règle d'applicabilité : *${act.applicableCase}*` : ''}
+${act.comment ? `- [ ] Documentation métier : *${act.comment}*` : ''}`;
+}
+
+function renderPmgJiraStoriesContent(activities) {
+  let storiesHtml = '';
+  activities.forEach((act, idx) => {
+    const mdText = generatePmgUserStoryText(act, 'markdown');
+    const jiraText = generatePmgUserStoryText(act, 'jira');
+    const typeKey = window.getPmgTypeKey(act.type || act.typeLabel);
+    const meta = PMG_TYPE_META[typeKey] || { label: act.type, icon: '📄', color: '#64748b' };
+    const safeEscapedMd = encodeURIComponent(mdText);
+    const safeEscapedJira = encodeURIComponent(jiraText);
+
+    storiesHtml += `
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:16px; margin-bottom:14px; box-shadow:var(--shadow-sm);">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <div>
+            <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; background:${meta.color}22; color:${meta.color}; border:1px solid ${meta.color}44;">
+              ${meta.icon} ${meta.label}
+            </span>
+            <span style="font-size:11px; color:var(--text-tertiary); margin-left:6px; font-family:var(--font-mono, monospace);">
+              US #${idx + 1} • \`${act.id}\`
+            </span>
+            <h4 style="margin:6px 0 0; font-size:15px; color:var(--text-primary); font-weight:700;">
+              [US-BPMN] ${escHtml(act.name)}
+            </h4>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn-ghost" style="font-size:11px; padding:4px 8px; height:28px;" onclick="copyPmgEncodedText('${safeEscapedMd}', this, 'Markdown Copié !')">
+              📋 Copier Markdown
+            </button>
+            <button class="btn-ghost" style="font-size:11px; padding:4px 8px; height:28px; border-color:var(--brand-primary); color:var(--brand-primary);" onclick="copyPmgEncodedText('${safeEscapedJira}', this, 'Jira Copié !')">
+              📋 Copier Jira Markup
+            </button>
+          </div>
+        </div>
+
+        <div style="background:var(--bg-hover); border:1px solid var(--border-color); border-radius:6px; padding:12px; font-size:12px; line-height:1.5; color:var(--text-secondary);">
+          <div style="margin-bottom:6px;">
+            <strong>En tant que :</strong> <span style="color:#ea5b0c; font-weight:600;">${escHtml(act.userGroup || act.entity || 'Opérateur')}</span>
+          </div>
+          <div style="margin-bottom:6px;">
+            <strong>Je souhaite :</strong> <span>exécuter la tâche "${escHtml(act.name)}"</span>
+          </div>
+          <div style="margin-bottom:8px;">
+            <strong>Afin de :</strong> <span>générer et valider <code>${(act.outputs || []).join(', ') || 'le statut de l\'activité'}</code></span>
+          </div>
+          <div style="border-top:1px dashed var(--border-color); padding-top:6px; font-size:11.5px;">
+            <strong>Critères d'Acceptation :</strong>
+            <ul style="margin:4px 0 0; padding-left:18px;">
+              <li>Habilitation groupe : <em>${escHtml(act.userGroup || act.entity || 'Tous les utilisateurs')}</em></li>
+              <li>Champs en entrée vérifiés : <code>${(act.inputs || []).join(', ') || 'Aucun'}</code></li>
+              <li>Variables de sortie générées : <code>${(act.outputs || []).join(', ') || 'Validation'}</code></li>
+              ${act.applicableCase ? `<li>Règle conditionnelle : <em>${escHtml(act.applicableCase)}</em></li>` : ''}
+            </ul>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+
+  return `
+    <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <span style="font-size:12px; color:var(--text-secondary);">
+        ${activities.length} User Stories générées et prêtes pour l'importation dans votre backlog Jira ou Confluence.
+      </span>
+    </div>
+    ${storiesHtml}
+  `;
+}
+
+function renderPmgTestPayloadsContent(activities) {
+  // Collect all input variables needed by root & initial steps
+  const initialVars = new Set();
+  const allOutputs = new Set();
+
+  activities.forEach(a => {
+    (a.inputs || []).forEach(v => {
+      const n = getVarName(v);
+      if (n && !allOutputs.has(n)) initialVars.add(n);
+    });
+    (a.outputs || []).forEach(v => {
+      const n = getVarName(v);
+      if (n) allOutputs.add(n);
+    });
+  });
+
+  // Infer mock values
+  const payloadObj = {};
+  Array.from(initialVars).sort().forEach(v => {
+    const low = v.toLowerCase();
+    if (low.includes('flag') || low.includes('valid') || low.includes('is') || low.includes('has') || low.includes('conforme')) {
+      payloadObj[v] = true;
+    } else if (low.includes('list') || low.includes('items') || low.includes('array') || low.includes('skus')) {
+      payloadObj[v] = ["ITEM_001", "ITEM_002"];
+    } else if (low.includes('amount') || low.includes('score') || low.includes('count') || low.includes('loop') || low.includes('prix')) {
+      payloadObj[v] = 100;
+    } else if (low.includes('id') || low.includes('num') || low.includes('code') || low.includes('token')) {
+      payloadObj[v] = `${v.toUpperCase()}_12345`;
+    } else {
+      payloadObj[v] = `valeur_test_${v}`;
+    }
+  });
+
+  const payloadJson = JSON.stringify(payloadObj, null, 2);
+  const safeEscapedJson = encodeURIComponent(payloadJson);
+
+  // Mocks for worker tasks (service tasks & script tasks)
+  const workerTasks = activities.filter(a => {
+    const t = (a.type || '').toLowerCase();
+    return t.includes('service') || t.includes('script');
+  });
+
+  let workerMocksJson = {};
+  workerTasks.forEach(wt => {
+    const mockRes = {};
+    (wt.outputs || []).forEach(o => {
+      const n = getVarName(o);
+      if (n) mockRes[n] = `mock_result_${n}`;
+    });
+    workerMocksJson[wt.id || wt.name] = {
+      taskName: wt.name,
+      mockOutputs: mockRes
+    };
+  });
+  const workerMocksStr = JSON.stringify(workerMocksJson, null, 2);
+  const safeWorkerJson = encodeURIComponent(workerMocksStr);
+
+  return `
+    <div style="display:flex; flex-direction:column; gap:16px;">
+      <!-- Carte 1 : Payload Démarrage -->
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+          <div>
+            <h4 style="margin:0 0 2px; font-size:14px; color:var(--text-primary); font-weight:700;">
+              📥 Payload JSON de Démarrage (Start Process Instance)
+            </h4>
+            <div style="font-size:11.5px; color:var(--text-secondary);">
+              Payload d'initialisation prêt pour Camunda 8 Zeebe Client, Postman ou l'API REST Camunda.
+            </div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn-ghost" style="font-size:11px; padding:4px 8px; height:28px;" onclick="copyPmgEncodedText('${safeEscapedJson}', this, 'JSON Copié !')">
+              📋 Copier JSON
+            </button>
+            <button class="btn-ghost" style="font-size:11px; padding:4px 8px; height:28px; border-color:var(--ok); color:var(--ok);" onclick="downloadPmgJson('${safeEscapedJson}', 'startProcessPayload.json')">
+              📥 Télécharger JSON
+            </button>
+          </div>
+        </div>
+        <pre style="background:var(--bg-hover); border:1px solid var(--border-color); border-radius:6px; padding:12px; font-size:11.5px; font-family:var(--font-mono, monospace); color:var(--text-primary); max-height:220px; overflow:auto; margin:0;">${escHtml(payloadJson)}</pre>
+      </div>
+
+      <!-- Carte 2 : Mocks Workers -->
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+          <div>
+            <h4 style="margin:0 0 2px; font-size:14px; color:var(--text-primary); font-weight:700;">
+              🤖 Mocks de Réponses pour Service Tasks &amp; Scripts (${workerTasks.length} tâches)
+            </h4>
+            <div style="font-size:11.5px; color:var(--text-secondary);">
+              Réponses simulées pour tester le processus en isolation sans dépendance backend.
+            </div>
+          </div>
+          <button class="btn-ghost" style="font-size:11px; padding:4px 8px; height:28px;" onclick="copyPmgEncodedText('${safeWorkerJson}', this, 'Mocks Copiés !')">
+            📋 Copier Mocks
+          </button>
+        </div>
+        <pre style="background:var(--bg-hover); border:1px solid var(--border-color); border-radius:6px; padding:12px; font-size:11.5px; font-family:var(--font-mono, monospace); color:var(--text-primary); max-height:220px; overflow:auto; margin:0;">${escHtml(workerMocksStr)}</pre>
+      </div>
+    </div>
+  `;
+}
+
+window.copyPmgEncodedText = function(encodedText, btnElement, successMsg = 'Copié !') {
+  const text = decodeURIComponent(encodedText);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      if (btnElement) {
+        const orig = btnElement.innerHTML;
+        btnElement.innerHTML = `✅ ${successMsg}`;
+        setTimeout(() => btnElement.innerHTML = orig, 1800);
+      }
+    });
+  } else {
+    prompt("Copiez le texte ci-dessous (Ctrl+C) :", text);
+  }
+};
+
+window.downloadPmgJson = function(encodedJson, filename = 'payload.json') {
+  const json = decodeURIComponent(encodedJson);
+  dl(json, filename, 'application/json');
+};
+
+window.exportPmgJiraCSV = function() {
+  const activities = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || window.pmgTempSubprocesses || []);
+
+  if (!activities || activities.length === 0) {
+    alert("Aucune activité disponible pour l'export Jira.");
+    return;
+  }
+
+  const procName = document.getElementById('pmgProcessNameStep')?.value || window.pmgProcessDetails?.name || 'Processus';
+  const procId = document.getElementById('pmgProcessIdStep')?.value || window.pmgProcessDetails?.id || 'process';
+
+  let csv = 'Summary,Issue Type,Description,Assignee,Component,Labels\n';
+  activities.forEach(act => {
+    const isHuman = (act.type || '').toLowerCase().includes('user') || (act.type || '').toLowerCase().includes('manual');
+    const issueType = isHuman ? 'Story' : 'Task';
+    const summary = `[US-BPMN] ${act.name}`;
+    const desc = generatePmgUserStoryText(act, 'jira').replace(/"/g, '""');
+    const assignee = act.userGroup || act.entity || '';
+    const component = procName;
+    const labels = `BPMN,PMG,${act.type || 'Task'}`;
+
+    csv += `"${summary}","${issueType}","${desc}","${assignee}","${component}","${labels}"\n`;
+  });
+
+  dl(csv, `jira_user_stories_${procId}.csv`, 'text/csv');
+};
+
+window.exportPmgFddMarkdown = function() {
+  const activities = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || window.pmgTempSubprocesses || []);
+
+  const procName = document.getElementById('pmgProcessNameStep')?.value || window.pmgProcessDetails?.name || 'Processus';
+  const procId = document.getElementById('pmgProcessIdStep')?.value || window.pmgProcessDetails?.id || 'process';
+  const owner = document.getElementById('pmgProcessOwnerStep')?.value || window.pmgProcessDetails?.owner || 'Direction Métier';
+
+  let md = `# Cahier des Spécifications Fonctionnelles & User Stories (FDD)\n\n`;
+  md += `**Processus :** ${procName} (\`${procId}\`)  \n`;
+  md += `**Propriétaire Métier :** ${owner}  \n`;
+  md += `**Date de Génération :** ${new Date().toLocaleDateString('fr-FR')}  \n\n`;
+  md += `## 1. Sommaire des User Stories\n\n`;
+
+  activities.forEach((act, idx) => {
+    md += `${idx + 1}. [US #${idx + 1} - ${act.name}](#us-${idx + 1})\n`;
+  });
+  md += `\n---\n\n## 2. Détail des Spécifications par Activité\n\n`;
+
+  activities.forEach((act, idx) => {
+    md += `<a name="us-${idx + 1}"></a>\n`;
+    md += generatePmgUserStoryText(act, 'markdown');
+    md += `\n\n---\n\n`;
+  });
+
+  dl(md, `specifications_fonctionnelles_jira_${procId}.md`, 'text/markdown');
+};
+
+// =========================================================================
+// FEATURE 3: GÉNÉRATEUR DE MODES OPÉRATOIRES MÉTIER (SOP)
+// =========================================================================
+
+window.pmgSopState = {
+  filterRole: 'all',
+  onlyHuman: false,
+  mode: 'cards', // 'cards' | 'checklist' | 'doc'
+  searchQuery: '',
+  completedSteps: new Set()
+};
+
+window.renderPmgSop = function(containerId = 'pmgSopContainer') {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const allActs = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || window.pmgTempSubprocesses || []);
+
+  if (!allActs || allActs.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state" style="padding:40px; text-align:center;">
+        <div class="empty-icon" style="font-size:36px; margin-bottom:10px;">📖</div>
+        <h4 style="margin:0 0 6px; color:var(--text-primary); font-size:16px;">Aucune activité disponible pour générer les modes opératoires</h4>
+        <p style="margin:0; color:var(--text-secondary); font-size:13px;">Veuillez importer des fichiers BPMN ou remplir la matrice PMG pour afficher les guides opérationnels (SOP).</p>
+      </div>
+    `;
+    return;
+  }
+
+  // Extract unique roles / entities for filter dropdown
+  const rolesSet = new Set();
+  allActs.forEach(a => {
+    if (a.entity && a.entity.trim()) rolesSet.add(a.entity.trim());
+    if (a.userGroup && a.userGroup.trim()) rolesSet.add(a.userGroup.trim());
+  });
+  const rolesList = Array.from(rolesSet).sort();
+
+  // Apply filters
+  let filteredActs = allActs.filter(act => {
+    if (window.pmgSopState.onlyHuman) {
+      const isH = (act.type || '').toLowerCase().includes('user') || (act.type || '').toLowerCase().includes('manual');
+      if (!isH) return false;
+    }
+    if (window.pmgSopState.filterRole !== 'all') {
+      const ent = (act.entity || '').trim();
+      const ug = (act.userGroup || '').trim();
+      if (ent !== window.pmgSopState.filterRole && ug !== window.pmgSopState.filterRole) return false;
+    }
+    if (window.pmgSopState.searchQuery) {
+      const q = window.pmgSopState.searchQuery.toLowerCase();
+      const matchName = (act.name || '').toLowerCase().includes(q);
+      const matchComment = (act.comment || '').toLowerCase().includes(q);
+      const matchRole = (act.entity || '').toLowerCase().includes(q);
+      if (!matchName && !matchComment && !matchRole) return false;
+    }
+    return true;
+  });
+
+  const procName = document.getElementById('pmgProcessNameStep')?.value || window.pmgProcessDetails?.name || 'Processus Métier';
+  const procId = document.getElementById('pmgProcessIdStep')?.value || window.pmgProcessDetails?.id || 'PROC_01';
+  const owner = document.getElementById('pmgProcessOwnerStep')?.value || window.pmgProcessDetails?.owner || 'Direction Opérationnelle';
+  const version = document.getElementById('pmgProcessVersionStep')?.value || window.pmgProcessDetails?.version || 'v1.0';
+  const desc = document.getElementById('pmgProcessDescStep')?.value || window.pmgProcessDetails?.desc || 'Guide standard d\'exécution des tâches opérationnelles pour les acteurs métier et opérateurs.';
+
+  const totalSteps = allActs.length;
+  const humanSteps = allActs.filter(a => (a.type || '').toLowerCase().includes('user') || (a.type || '').toLowerCase().includes('manual')).length;
+  const completedCount = window.pmgSopState.completedSteps.size;
+  const completionPct = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
+
+  let html = `
+    <div class="pmg-sop-wrapper" style="display:flex; flex-direction:column; gap:20px;">
+      
+      <!-- En-tête Guide SOP & KPIs -->
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:16px;">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+              <span style="background:rgba(0,156,215,0.12); color:var(--brand-primary); font-size:11px; font-weight:700; padding:3px 8px; border-radius:6px; text-transform:uppercase;">
+                SOP • Standard Operating Procedures
+              </span>
+              <span style="font-size:12px; color:var(--text-tertiary);">Version ${escHtml(version)} • ID: ${escHtml(procId)}</span>
+            </div>
+            <h3 style="margin:0 0 6px; font-size:20px; font-weight:800; color:var(--text-primary);">
+              📖 Mode Opératoire Métier : ${escHtml(procName)}
+            </h3>
+            <p style="margin:0; font-size:13px; color:var(--text-secondary); max-width:850px; line-height:1.5;">
+              ${escHtml(desc)}
+            </p>
+          </div>
+
+          <!-- Boutons d'exportation SOP -->
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn-ghost" style="font-size:11.5px; height:32px; padding:0 10px;" onclick="window.exportPmgSopMarkdown()">
+              📥 Export Markdown (Confluence)
+            </button>
+            <button class="btn-ghost" style="font-size:11.5px; height:32px; padding:0 10px; border-color:var(--brand-primary); color:var(--brand-primary);" onclick="window.exportPmgSopHtmlPackage()">
+              🌐 Pack HTML Autonome
+            </button>
+            <button class="btn-primary" style="font-size:11.5px; height:32px; padding:0 12px;" onclick="window.exportPmgSopPrint()">
+              🖨️ Imprimer / PDF A4
+            </button>
+          </div>
+        </div>
+
+        <!-- Badges Métriques Opérationnelles -->
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:12px; padding-top:14px; border-top:1px solid var(--border-color);">
+          <div style="background:var(--bg-hover); padding:10px 14px; border-radius:8px; border:1px solid var(--border-color);">
+            <div style="font-size:11px; color:var(--text-tertiary); font-weight:600; text-transform:uppercase;">Étapes Totales</div>
+            <div style="font-size:18px; font-weight:800; color:var(--text-primary); margin-top:2px;">${totalSteps}</div>
+          </div>
+          <div style="background:var(--bg-hover); padding:10px 14px; border-radius:8px; border:1px solid var(--border-color);">
+            <div style="font-size:11px; color:var(--text-tertiary); font-weight:600; text-transform:uppercase;">Tâches Humaines</div>
+            <div style="font-size:18px; font-weight:800; color:#ea5b0c; margin-top:2px;">${humanSteps}</div>
+          </div>
+          <div style="background:var(--bg-hover); padding:10px 14px; border-radius:8px; border:1px solid var(--border-color);">
+            <div style="font-size:11px; color:var(--text-tertiary); font-weight:600; text-transform:uppercase;">Rôles &amp; Services</div>
+            <div style="font-size:18px; font-weight:800; color:var(--brand-primary); margin-top:2px;">${rolesList.length}</div>
+          </div>
+          <div style="background:var(--bg-hover); padding:10px 14px; border-radius:8px; border:1px solid var(--border-color);">
+            <div style="font-size:11px; color:var(--text-tertiary); font-weight:600; text-transform:uppercase;">Progression Checklist</div>
+            <div style="font-size:18px; font-weight:800; color:var(--ok); margin-top:2px;">${completedCount} / ${totalSteps} (${completionPct}%)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Barre de Filtres & Modes d'Affichage -->
+      <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <!-- Recherche -->
+          <input type="text" placeholder="🔍 Rechercher une consigne..." value="${escAttr(window.pmgSopState.searchQuery)}" 
+                 oninput="window.pmgSopState.searchQuery = this.value; window.renderPmgSop('${containerId}');"
+                 style="height:32px; width:220px; font-size:12px; padding:0 10px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-primary);">
+
+          <!-- Filtre Rôle -->
+          <select style="height:32px; font-size:12px; padding:0 10px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-primary);"
+                  onchange="window.pmgSopState.filterRole = this.value; window.renderPmgSop('${containerId}');">
+            <option value="all" ${window.pmgSopState.filterRole === 'all' ? 'selected' : ''}>👥 Tous les Rôles &amp; Équipes</option>
+            ${rolesList.map(r => `<option value="${escAttr(r)}" ${window.pmgSopState.filterRole === r ? 'selected' : ''}>${escHtml(r)}</option>`).join('')}
+          </select>
+
+          <!-- Filtre Tâches Humaines -->
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer; user-select:none;">
+            <input type="checkbox" ${window.pmgSopState.onlyHuman ? 'checked' : ''} 
+                   onchange="window.pmgSopState.onlyHuman = this.checked; window.renderPmgSop('${containerId}');">
+            👤 Tâches Humaines uniquement
+          </label>
+        </div>
+
+        <!-- Switcher de Vue -->
+        <div style="display:flex; background:var(--bg-hover); padding:3px; border-radius:6px; border:1px solid var(--border-color); gap:4px;">
+          <button class="btn-ghost" style="height:26px; font-size:11.5px; padding:0 10px; border-radius:4px; ${window.pmgSopState.mode === 'cards' ? 'background:var(--bg-card); font-weight:700; color:var(--brand-primary); box-shadow:0 1px 3px rgba(0,0,0,0.08);' : 'border:none;'}"
+                  onclick="window.pmgSopState.mode = 'cards'; window.renderPmgSop('${containerId}');">
+            📇 Fiches Réflexes
+          </button>
+          <button class="btn-ghost" style="height:26px; font-size:11.5px; padding:0 10px; border-radius:4px; ${window.pmgSopState.mode === 'checklist' ? 'background:var(--bg-card); font-weight:700; color:var(--brand-primary); box-shadow:0 1px 3px rgba(0,0,0,0.08);' : 'border:none;'}"
+                  onclick="window.pmgSopState.mode = 'checklist'; window.renderPmgSop('${containerId}');">
+            📋 Checklist Opérateur
+          </button>
+          <button class="btn-ghost" style="height:26px; font-size:11.5px; padding:0 10px; border-radius:4px; ${window.pmgSopState.mode === 'doc' ? 'background:var(--bg-card); font-weight:700; color:var(--brand-primary); box-shadow:0 1px 3px rgba(0,0,0,0.08);' : 'border:none;'}"
+                  onclick="window.pmgSopState.mode = 'doc'; window.renderPmgSop('${containerId}');">
+            📑 Document Continu
+          </button>
+        </div>
+      </div>
+
+      <!-- Corps des Fiches SOP -->
+      <div id="pmgSopCardsList" style="display:flex; flex-direction:column; gap:16px;">
+        ${filteredActs.length === 0 ? `
+          <div style="padding:30px; text-align:center; color:var(--text-secondary); background:var(--bg-card); border-radius:8px; border:1px solid var(--border-color);">
+            Aucune étape ne correspond aux filtres sélectionnés.
+          </div>
+        ` : filteredActs.map((act, idx) => window.renderPmgSopStepItem(act, idx + 1, filteredActs.length)).join('')}
+      </div>
+
+    </div>
+  `;
+
+  container.innerHTML = html;
+};
+
+window.renderPmgSopStepItem = function(act, stepNum, total) {
+  const isHuman = (act.type || '').toLowerCase().includes('user') || (act.type || '').toLowerCase().includes('manual');
+  const isAuto = (act.type || '').toLowerCase().includes('service') || (act.type || '').toLowerCase().includes('script');
+  const isSub = (act.type || '').toLowerCase().includes('call') || (act.type || '').toLowerCase().includes('sub');
+  
+  const isDone = window.pmgSopState.completedSteps.has(act.id);
+  const mode = window.pmgSopState.mode;
+
+  const typeBadge = isHuman 
+    ? '<span style="background:rgba(234,91,12,0.1); color:#ea5b0c; border:1px solid rgba(234,91,12,0.25); font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:5px;">👤 Tâche Humaine</span>'
+    : (isAuto 
+        ? '<span style="background:rgba(16,185,129,0.1); color:#10b981; border:1px solid rgba(16,185,129,0.25); font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:5px;">⚙️ Automatique</span>'
+        : '<span style="background:rgba(0,156,215,0.1); color:#009cd7; border:1px solid rgba(0,156,215,0.25); font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:5px;">📦 Sous-processus</span>');
+
+  const roleText = act.entity || act.userGroup || 'Opérateur Non Défini';
+  const roleGroupText = act.userGroup ? ` (Groupe: ${act.userGroup})` : '';
+
+  // Heuristic Operational Instructions
+  let operationalGuidance = act.comment || '';
+  if (!operationalGuidance) {
+    if (isHuman) {
+      operationalGuidance = `Prendre en charge la tâche "${act.name}". Consulter les informations transmises en entrée, procéder aux vérifications d'usage et valider le formulaire.`;
+    } else if (isAuto) {
+      operationalGuidance = `Traitement automatique exécuté par le système. Calcul ou appel API sur la base des variables en entrée.`;
+    } else {
+      operationalGuidance = `Délégation d'exécution vers le processus sous-jacent "${act.calledElement || act.name}".`;
+    }
+  }
+
+  // Quality / Compliance Warning
+  let qualityCheck = act.applicableCase ? `Condition requise : ${act.applicableCase}` : 'Vérifier la complétude et l\'intégrité des données avant validation.';
+
+  // Mode Checklist
+  if (mode === 'checklist') {
+    return `
+      <div style="background:var(--bg-card); border:1px solid ${isDone ? 'var(--ok)' : 'var(--border-color)'}; border-radius:8px; padding:14px 18px; display:flex; align-items:center; justify-content:space-between; gap:16px; transition:all 0.2s;">
+        <div style="display:flex; align-items:center; gap:14px; flex:1;">
+          <input type="checkbox" ${isDone ? 'checked' : ''} 
+                 style="width:20px; height:20px; cursor:pointer; accent-color:var(--ok);"
+                 onchange="window.togglePmgSopChecklistStep('${act.id}');">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+              <span style="font-weight:800; font-size:12px; color:var(--brand-primary);">Étape ${stepNum}</span>
+              ${typeBadge}
+              <span style="font-size:11.5px; color:var(--text-tertiary);">Rôle : <strong>${escHtml(roleText)}</strong></span>
+            </div>
+            <div style="font-size:14px; font-weight:700; color:var(--text-primary); text-decoration:${isDone ? 'line-through' : 'none'}; opacity:${isDone ? 0.7 : 1};">
+              ${escHtml(act.name)}
+            </div>
+            <div style="font-size:12px; color:var(--text-secondary); margin-top:3px;">
+              👉 ${escHtml(operationalGuidance)}
+            </div>
+          </div>
+        </div>
+        <div style="text-align:right; font-size:11.5px; color:var(--text-tertiary);">
+          ${act.inputs && act.inputs.length > 0 ? `<span>📥 ${act.inputs.length} E</span> ` : ''}
+          ${act.outputs && act.outputs.length > 0 ? `<span>📤 ${act.outputs.length} S</span>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  // Mode Cards & Document Continu
+  return `
+    <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; padding:18px 20px; box-shadow:0 2px 6px rgba(0,0,0,0.03); page-break-inside:avoid; margin-bottom:${mode === 'doc' ? '20px' : '0'};">
+      
+      <!-- Titre de la Fiche Réflexe -->
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px; margin-bottom:12px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+        <div>
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+            <span style="background:var(--bg-hover); color:var(--text-secondary); font-size:11px; font-weight:800; padding:2px 7px; border-radius:4px; border:1px solid var(--border-color);">
+              FICHE OPÉRATOIRE #${stepNum}
+            </span>
+            ${typeBadge}
+            ${act.realizationMode ? `<span style="font-size:11px; color:var(--text-tertiary);">Mode: <strong>${escHtml(act.realizationMode)}</strong></span>` : ''}
+          </div>
+          <h4 style="margin:0; font-size:16px; font-weight:800; color:var(--text-primary);">
+            ${escHtml(act.name)}
+          </h4>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:12px; background:rgba(0,156,215,0.08); color:var(--brand-primary); padding:4px 10px; border-radius:6px; font-weight:600;">
+            👤 ${escHtml(roleText)}${escHtml(roleGroupText)}
+          </span>
+        </div>
+      </div>
+
+      <!-- Corps du Mode Opératoire -->
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px;">
+        
+        <!-- Colonne 1 : Consignes & Actions Métier -->
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div>
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--brand-primary); margin-bottom:4px;">
+              🎯 1. Description de la Tâche &amp; Consignes d'Exécution
+            </div>
+            <div style="font-size:12.5px; color:var(--text-primary); background:var(--bg-hover); padding:10px 12px; border-radius:6px; border:1px solid var(--border-color); line-height:1.5;">
+              ${escHtml(operationalGuidance)}
+            </div>
+          </div>
+
+          <div>
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:#ea5b0c; margin-bottom:4px;">
+              ⚠️ 2. Point de Vigilance Qualité &amp; Règle Métier
+            </div>
+            <div style="font-size:12px; color:var(--text-secondary); background:rgba(234,91,12,0.05); border:1px solid rgba(234,91,12,0.2); padding:8px 12px; border-radius:6px;">
+              ${escHtml(qualityCheck)}
+            </div>
+          </div>
+        </div>
+
+        <!-- Colonne 2 : Données E/S & Livrables -->
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div>
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-secondary); margin-bottom:4px;">
+              📥 3. Données d'Entrée Requises (Inputs / Formulaires)
+            </div>
+            <div style="font-size:12px; color:var(--text-primary); background:var(--bg-hover); padding:8px 12px; border-radius:6px; border:1px solid var(--border-color); min-height:36px;">
+              ${act.inputs && act.inputs.length > 0 
+                ? act.inputs.map(i => `<span style="display:inline-block; background:rgba(0,156,215,0.1); color:var(--brand-primary); padding:2px 6px; border-radius:4px; margin:2px 4px 2px 0; font-family:var(--font-mono, monospace); font-size:11px;">${escHtml(i)}</span>`).join('')
+                : '<span style="color:var(--text-tertiary); font-style:italic;">Aucune variable d\'entrée explicite</span>'}
+            </div>
+          </div>
+
+          <div>
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--ok); margin-bottom:4px;">
+              📤 4. Livrables &amp; Données Produites (Outputs / Décisions)
+            </div>
+            <div style="font-size:12px; color:var(--text-primary); background:var(--bg-hover); padding:8px 12px; border-radius:6px; border:1px solid var(--border-color); min-height:36px;">
+              ${act.outputs && act.outputs.length > 0 
+                ? act.outputs.map(o => `<span style="display:inline-block; background:rgba(16,185,129,0.1); color:var(--ok); padding:2px 6px; border-radius:4px; margin:2px 4px 2px 0; font-family:var(--font-mono, monospace); font-size:11px;">${escHtml(o)}</span>`).join('')
+                : '<span style="color:var(--text-tertiary); font-style:italic;">Aucune variable de sortie explicite</span>'}
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Bas de fiche : Escalade & Enchaînement -->
+      <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; font-size:11.5px; color:var(--text-tertiary);">
+        <div>
+          🛡️ <strong>Escalade / Exception :</strong> En cas de blocage, avertir le responsable d'activité (<em>${escHtml(roleText)}</em>).
+        </div>
+        <div>
+          ID Technique : <code>${escHtml(act.id)}</code>
+        </div>
+      </div>
+
+    </div>
+  `;
+};
+
+window.togglePmgSopChecklistStep = function(actId) {
+  if (window.pmgSopState.completedSteps.has(actId)) {
+    window.pmgSopState.completedSteps.delete(actId);
+  } else {
+    window.pmgSopState.completedSteps.add(actId);
+  }
+  window.renderPmgSop('pmgSopContainer');
+};
+
+window.exportPmgSopMarkdown = function() {
+  const activities = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || window.pmgTempSubprocesses || []);
+
+  const procName = document.getElementById('pmgProcessNameStep')?.value || window.pmgProcessDetails?.name || 'Processus Métier';
+  const procId = document.getElementById('pmgProcessIdStep')?.value || window.pmgProcessDetails?.id || 'process';
+  const owner = document.getElementById('pmgProcessOwnerStep')?.value || window.pmgProcessDetails?.owner || 'Direction Opérationnelle';
+  const version = document.getElementById('pmgProcessVersionStep')?.value || window.pmgProcessDetails?.version || 'v1.0';
+  const desc = document.getElementById('pmgProcessDescStep')?.value || window.pmgProcessDetails?.desc || 'Guide standard d\'exécution des tâches opérationnelles.';
+
+  let md = `# 📖 Mode Opératoire Métier (SOP) : ${procName}\n\n`;
+  md += `**Référence Processus :** \`${procId}\`  \n`;
+  md += `**Version :** ${version}  \n`;
+  md += `**Propriétaire Opérationnel :** ${owner}  \n`;
+  md += `**Date de Génération :** ${new Date().toLocaleDateString('fr-FR')}  \n\n`;
+  md += `> **Objectif & Portée :**  \n> ${desc}\n\n`;
+  md += `## 📋 Sommaire des Fiches Opératoires\n\n`;
+
+  activities.forEach((act, idx) => {
+    md += `${idx + 1}. [Étape ${idx + 1} - ${act.name} (${act.entity || 'Opérateur'})](#etape-${idx + 1})\n`;
+  });
+  md += `\n---\n\n## 📇 Fiches Réflexes Détaillées par Étape\n\n`;
+
+  activities.forEach((act, idx) => {
+    const isHuman = (act.type || '').toLowerCase().includes('user') || (act.type || '').toLowerCase().includes('manual');
+    md += `<a name="etape-${idx + 1}"></a>\n`;
+    md += `### Étape ${idx + 1} : ${act.name}\n\n`;
+    md += `- **Type d'activité :** ${act.typeLabel || act.type} (${isHuman ? '👤 Humaine' : '⚙️ Automatique'})\n`;
+    md += `- **Acteur / Rôle Responsable :** **${act.entity || 'Non spécifié'}**\n`;
+    if (act.userGroup) md += `- **Habilitations / Groupe requis :** \`${act.userGroup}\`\n`;
+    md += `- **Mode de Réalisation :** ${act.realizationMode || 'Standard'}\n\n`;
+    
+    md += `#### 🎯 1. Consignes d'Exécution\n`;
+    md += `${act.comment || 'Prendre en charge la tâche et appliquer les contrôles opérationnels en vigueur.'}\n\n`;
+
+    if (act.applicableCase) {
+      md += `#### ⚠️ 2. Condition d'Applicabilité & Points de Vigilance\n`;
+      md += `${act.applicableCase}\n\n`;
+    }
+
+    md += `#### 📥 3. Données d'Entrée & Prérequis\n`;
+    if (act.inputs && act.inputs.length > 0) {
+      act.inputs.forEach(i => md += `- \`${i}\`\n`);
+    } else {
+      md += `_Aucun prérequis bloquant explicite_\n`;
+    }
+    md += `\n`;
+
+    md += `#### 📤 4. Livrables & Résultats Attendus\n`;
+    if (act.outputs && act.outputs.length > 0) {
+      act.outputs.forEach(o => md += `- \`${o}\`\n`);
+    } else {
+      md += `_Transition vers l'activité suivante_\n`;
+    }
+    md += `\n---\n\n`;
+  });
+
+  dl(md, `mode_operatoire_SOP_${procId}.md`, 'text/markdown');
+};
+
+window.exportPmgSopHtmlPackage = function() {
+  const activities = typeof window.getPmgFilteredActivities === 'function'
+    ? window.getPmgFilteredActivities()
+    : (window.pmgActivities || window.pmgTempSubprocesses || []);
+
+  const procName = document.getElementById('pmgProcessNameStep')?.value || window.pmgProcessDetails?.name || 'Processus Métier';
+  const procId = document.getElementById('pmgProcessIdStep')?.value || window.pmgProcessDetails?.id || 'process';
+  const owner = document.getElementById('pmgProcessOwnerStep')?.value || window.pmgProcessDetails?.owner || 'Direction Métier';
+  const version = document.getElementById('pmgProcessVersionStep')?.value || window.pmgProcessDetails?.version || 'v1.0';
+
+  let docHtml = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>SOP - ${escHtml(procName)}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; color: #1e293b; background: #f8fafc; margin: 0; padding: 30px; }
+    .container { max-width: 900px; margin: 0 auto; background: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); }
+    h1 { color: #0f172a; margin-top: 0; border-bottom: 2px solid #009cd7; padding-bottom: 10px; font-size: 24px; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; background: #e0f2fe; color: #0369a1; }
+    .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 10px; margin-bottom: 12px; }
+    .card-title { font-size: 16px; font-weight: 700; color: #0f172a; margin: 0; }
+    .tag { display: inline-block; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 11px; margin-right: 4px; }
+    @media print { body { background: #fff; padding: 0; } .container { box-shadow: none; padding: 0; } .card { page-break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <span class="badge">Standard Operating Procedures (SOP)</span>
+      <span style="font-size:12px; color:#64748b;">Version ${escHtml(version)} • ${new Date().toLocaleDateString('fr-FR')}</span>
+    </div>
+    <h1>📖 Mode Opératoire : ${escHtml(procName)}</h1>
+    <p style="color:#475569; font-size:13px;"><strong>Responsable Métier :</strong> ${escHtml(owner)} | <strong>Identifiant :</strong> ${escHtml(procId)}</p>
+    
+    <h2>Étapes &amp; Fiches Réflexes</h2>
+    ${activities.map((act, idx) => `
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Étape ${idx + 1} : ${escHtml(act.name)}</div>
+          <div style="font-size:12px; font-weight:600; color:#0284c7;">👤 ${escHtml(act.entity || 'Opérateur')}</div>
+        </div>
+        <p style="margin:0 0 10px; font-size:13px; color:#334155;"><strong>Consigne :</strong> ${escHtml(act.comment || 'Exécuter la tâche selon les directives de service.')}</p>
+        ${act.inputs && act.inputs.length > 0 ? `<div style="font-size:12px; margin-bottom:6px;"><strong>📥 Données d'Entrée :</strong> ${act.inputs.map(i => `<span class="tag">${escHtml(i)}</span>`).join('')}</div>` : ''}
+        ${act.outputs && act.outputs.length > 0 ? `<div style="font-size:12px;"><strong>📤 Données Produites :</strong> ${act.outputs.map(o => `<span class="tag">${escHtml(o)}</span>`).join('')}</div>` : ''}
+      </div>
+    `).join('')}
+  </div>
+</body>
+</html>`;
+
+  dl(docHtml, `mode_operatoire_SOP_${procId}.html`, 'text/html');
+};
+
+window.exportPmgSopPrint = function() {
+  const container = document.getElementById('pmgSopContainer');
+  if (!container) return;
+
+  const prevMode = window.pmgSopState.mode;
+  window.pmgSopState.mode = 'cards';
+  window.renderPmgSop('pmgSopContainer');
+
+  setTimeout(() => {
+    window.print();
+    window.pmgSopState.mode = prevMode;
+    window.renderPmgSop('pmgSopContainer');
+  }, 300);
+};
+
+
 

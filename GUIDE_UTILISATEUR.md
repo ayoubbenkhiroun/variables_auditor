@@ -30,8 +30,7 @@ La connexion est locale et sécurisée (côté navigateur). Après validation, l
 
 - **Audit des Variables** : Import, configuration, résultats, dashboard, graphe relationnel, classement, historique.
 - **Sous-processus** : Analyse des Call Activities, détection de boucles circulaires, cartographie.
-- **Nommage BPMN** : Audit des conventions de nommage des éléments BPMN (IDs, tâches, gateways, événements, messages, signaux).
-- **Audit Santé BPMN** : Analyse Lint multi-fichiers, règles équipe, dépendances, score de préparation et rapport exportable.
+- **Audit & Santé BPMN** : Module unifié d'analyse statique et conformité (contrôles structurels, conventions de nommage, dépendances inter-processus, score de readiness, visualiseur graphique interactif et génération de BPMN corrigé).
 - **Module PMG** (Process Matrix Governance) : Cartographie des activités, matrice de gouvernance, glossaire des variables, documentation technique automatisée.
 
 ---
@@ -187,93 +186,70 @@ Graphe interactif (Vis.js) de l'arborescence des appels.
 
 ---
 
-## 5. Module : Nommage BPMN
+## 5. Module : Audit & Santé BPMN (Qualité, Lint & Nommage)
 
-### 5.1 Import
+Ce module unifié combine l'ensemble des contrôles structurels BPMN 2.0, les conventions de nommage d'équipe, l'analyse des dépendances et les signaux de préparation au déploiement Camunda/Zeebe.
 
-Déposer un fichier `.bpmn` ou `.xml`.  
-L'application liste les éléments détectés (IDs, noms de processus, tâches, gateways, événements, messages, signaux, flux).
+### 5.1 Importer un ou plusieurs fichiers BPMN
 
-Avant l'analyse, vous pouvez (dé)sélectionner les règles de nommage à appliquer.
+Ouvrir **Audit & Santé BPMN** puis déposer ou sélectionner un ou plusieurs fichiers `.bpmn` ou `.xml` (25 Mo max par fichier).  
+L'application analyse le XML, identifie les processus et valide l'intégrité globale du lot.
 
-### 5.2 Configuration des règles
+### 5.2 Configurer les règles & conventions
 
-**Règles disponibles :**
+L'onglet **Règles & Conventions** regroupe l'ensemble des contrôles activables et paramétrables par catégorie :
+- **Structure & Intégrité (OMG BPMN 2.0)** : racine XML `bpmn:definitions`, namespaces OMG, unicité absolue des identifiants (`id`), intégrité des flux intra-pool, flux de messages inter-pools stricts, événements de début/fin conformes, flux entrants/sortants sur événements intermédiaires et de bordure (`boundaryEvent`), structure des sous-processus événementiels.
+- **Dépendances & Inter-processus** : unicité des Process IDs sur l'ensemble du lot, résolution des cibles de Call Activity (`calledElement`), détection des cycles d'appels récursifs et graphe de dépendance.
+- **Modélisation & Bonnes Pratiques** : détection des impasses (`dead-end`), branches sans issue terminale (`no-path-to-end`), nombre minimal de branches sur passerelles (Split ≥ 2, Join ≥ 2), interdiction de conditions et de branches par défaut sur passerelles parallèles (AND), obligation de condition sur branches non par défaut des passerelles exclusives (XOR), passerelles événementielles ciblant uniquement des événements ou Receive Tasks, séparation Join/Split (passerelles mixtes), limitation de la complexité cyclomatique et de la taille du processus (< 35 nœuds).
+- **Nommage & Sémantique Métier** :
+  - **Process ID** en kebab-case (`mon-processus-metier`)
+  - **Nom de processus** avec majuscule initiale
+  - **Tâches** formulées avec un verbe d'action à l'infinitif + complément (ex: `Traiter la commande`)
+  - **Sous-processus** formulés en phrase nominale (ex: `Gestion des réclamations`)
+  - **Passerelles de décision** formulées en question (`?`)
+  - **Passerelles AND** sans point d'interrogation
+  - **Événements** qualifiés (début en `Objet + Participe passé`, fin en état final résultant, multi-fins toutes documentées)
+  - **Variables** en camelCase strict (`montantTtc`) et sans mot-clé réservé FEEL/Zeebe
+  - **Messages & Signaux** en PascalCase avec suffixes explicites (`OrderReceivedMessage`, `StockAlertSignal`)
+- **Déploiement Camunda / Zeebe** : processus exécutable (`isExecutable="true"`), implémentation des Service Tasks / Send Tasks (`zeebe:taskDefinition`, `topic`, `class`, `expression`), règles DMN sur Business Rule Tasks (`decisionRef`), affectation des User Tasks (`assignee`, groupes, formulaires), contenu des Script Tasks, définitions temporelles ISO 8601 des minuteurs (Timers), définitions d'erreurs (`errorCode`), d'escalades (`escalationCode`) et de signaux.
+- **Gouvernance & Documentation** : documentation des noms métier, affectation des activités à des lanes, présence des métadonnées de mise en page graphique BPMNDI.
 
-| Règle | Cible | Sévérité |
-|-------|-------|----------|
-| Process ID en kebab-case | ID de processus | Erreur |
-| Nom de processus : Majuscule | Nom de processus | Attention |
-| Variables : camelCase strict | Variable | Erreur |
-| Variables : Mots réservés | Variable | Erreur |
-| Variables : Collection au pluriel | Variable de collection | Attention |
-| Tâches : Verbe Infinitif + Complément | Tâche | Attention |
-| Sous-processus : Phrase nominale | Sous-processus | Attention |
-| Gateways divergentes : Question ? | Gateway divergente | Erreur |
-| Gateways AND : Pas de question | Gateway parallèle | Attention |
-| Flux de transition : Réponse attendue | Flux sortant | Erreur |
-| Événement Début : Objet + Part. Passé | Événement début | Attention |
-| Événement Attente : Description précise | Événement attente | Attention |
-| Événement Fin : État métier final | Événement fin | Attention |
-| Événement Bordure : Exception | Événement bordure | Attention |
-| Messages : PascalCase + Message | Message | Erreur |
-| Signaux : PascalCase + Signal | Signal | Erreur |
+**Règles personnalisées & Import/Export :**
+- Filtres rapides par catégorie pour naviguer facilement dans le catalogue de règles.
+- Possibilité d'ajouter des règles d'équipe basées sur des expressions régulières (Regex).
+- Export / Import de la politique de qualité au format JSON.
 
-**Personnalisation :**
-- Ajouter / Modifier / Supprimer des règles
-- Créer des règles basées sur des expressions régulières
-- Restaurer les valeurs par défaut
+### 5.3 Lire le rapport, Visualiser et Télécharger les BPMN corrigés
 
-### 5.3 Résultats
+1. **Tableau de bord & Score :**
+   - Score global de conformité et de readiness (préparation à la production).
+   - Verdict exécutif immédiat (Go Production, Go conditionnel avec réserves, Déploiement bloqué).
+   - Matrice 2D Heatmap croisée (BPMN × Catégories de règles) pour identifier instantanément les zones à risque.
 
-**KPIs :** Total éléments audités, Conformité globale (%), Erreurs critiques, Avertissements.  
-**Graphiques :** Répartition des conformités (donut), Violations par type d'élément (barres).  
-**Tableau :** Type, ID technique, Libellé actuel, Statut, Conventions non respectées, Suggestion corrective.
+2. **Visualiseur BPMN interactif :**
+   - Cliquez sur n'importe quel fichier ou constat pour afficher le diagramme BPMN avec zoom et surbrillance automatique de l'élément en anomalie.
 
-Le champ de suggestion est éditable pour ajuster la correction proposée.
+3. **Corrections automatiques & Exports :**
+   - **Nettoyer les libellés** : supprime les espaces superflus.
+   - **Télécharger BPMN corrigé** : applique automatiquement les corrections recommandées (passerelles, IDs, etc.) et génère les fichiers `.bpmn` prêts à l'emploi (individuel ou ZIP complet).
+   - **Exports exhaustifs** : Rapport complet disponible en HTML, Classeur Excel avec plan d'action RACI, CSV, JSON et format d'impression PDF.
 
-**Export :**
-- **Télécharger le BPMN corrigé** : Génère un fichier `.bpmn` avec toutes les corrections de nommage appliquées.
-- **Export CSV / Excel** du rapport d'audit.
-
----
-
-## 6. Module Audit Santé BPMN (Lint)
-
-Ce module complète l'audit de nommage par des contrôles structurels et des signaux de préparation au déploiement sur un lot de fichiers BPMN.
-
-### 6.1 Importer un lot
-
-Ouvrir **Audit Santé BPMN** puis déposer ou sélectionner un ou plusieurs fichiers `.bpmn` ou `.xml` (25 Mo maximum par fichier). Le nom de fichier doit être unique dans le lot ; une confirmation est demandée pour remplacer un fichier déjà chargé.
-
-### 6.2 Configurer les règles
-
-L'onglet **Règles Lint** propose des contrôles activables par catégorie : structure BPMN et références, dépendances des Call Activities, conventions de nommage, déploiement (processus exécutable, Service Tasks, User Tasks, scripts) et gouvernance. La sévérité se règle par règle : bloquant, erreur, avertissement ou information.
-
-Pour une convention d'équipe, ajouter une règle regex en choisissant un élément BPMN, un attribut, un motif et une sévérité. Les règles sont importables/exportables en JSON. Toute modification de la politique invalide le rapport courant ; relancer l'audit pour recalculer le score.
-
-### 6.3 Lire le rapport & Visualiser les diagrammes BPMN
-
-Cliquer sur **Lancer l'audit complet**. Le rapport présente l'état et le score de chaque fichier, les compteurs de bloquants/erreurs et d'avertissements, une ventilation par domaine et une liste filtrable/recherchable. Le graphe récapitule les racines, les appels, la profondeur, les cibles absentes et les cycles. Les éléments inatteignables et impasses sont signalés.
-
-Chaque anomalie inclut un propriétaire suggéré, une recommandation et une proposition de test de vérification. Ce plan est un point de départ à adapter à votre architecture, à vos rôles et à vos scénarios métier ; ce n'est pas une preuve d'exécution.
-
-### 6.4 Visualisation interactive du BPMN & Localisation des constats
+### 5.4 Visualisation interactive du BPMN & Localisation des constats
 
 En cliquant sur le nom d'un fichier (ou sur le bouton **👁️ Visualiser**) depuis le tableau d'import ou le rapport de synthèse, une visionneuse interactive BPMN 2.0 s'ouvre en plein écran :
 - **Navigation et Zoom** : Déplacement à la souris, zoom avant/arrière (`+` / `-`) et ajustement automatique (`📐 Ajuster`).
 - **Surlignage en direct des constats** : Les activités, passerelles ou événements en anomalie sont mis en surbrillance avec un badge d'avertissement ou d'erreur directement sur le diagramme.
 - **Volet latéral des constats** : Liste toutes les anomalies du fichier. En cliquant sur une anomalie dans la liste ou dans le tableau du rapport, le canevas zoome et se centre automatiquement sur l'élément en question (`bpmnLintFocusElement`).
 
-### 6.5 Corriger et exporter
+### 5.5 Corriger et exporter
 
-**Nettoyer les libellés sûrs** retire uniquement les espaces en bordure des attributs `name` BPMN et exporte une copie ; les originaux restent inchangés. Les corrections de logique ou de sens métier ne sont pas automatisées.
+**Nettoyer les libellés** retire les espaces superflus et **Télécharger BPMN corrigé** applique les conventions de nommage recommandées et exporte une copie ; les originaux restent inchangés.
 
-Le rapport se configure depuis **Règles Lint** : choisir HTML, CSV, Excel, JSON ou impression/PDF, puis sélectionner les sections synthèse, fichiers, anomalies et règles actives.
+Le rapport se configure depuis **Règles & Conventions** : choisir HTML, CSV, Excel, JSON ou impression/PDF, puis sélectionner les sections synthèse, matrice 2D, fichiers, anomalies et règles actives.
 
-> Le score est heuristique et dépend des règles activées. Un rapport conforme ne certifie pas la mise en production : valider le BPMN avec le moteur Camunda/Zeebe cible, les tests d'intégration et la recette métier.
+> Le score est calculé selon les règles activées. Un rapport conforme valide les bonnes pratiques avant déploiement sur les environnements cibles.
 
-## 7. Module PMG (Process Matrix Governance)
+## 6. Module PMG (Process Matrix Governance)
 
 ### 7.1 Importation One-Shot BPMN (Parent & Sous-processus)
 

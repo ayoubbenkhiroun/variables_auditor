@@ -47,11 +47,10 @@
 graph TD
     A[AuditFlow Pro] --> M1[1. Audit Variables & Multi-BPMN]
     A --> M2[2. Cartographie Sous-Processus]
-    A --> M3[3. Audit Nommage BPMN]
+    A --> M3[3. Audit & Santé BPMN (Lint & Nommage)]
     A --> M4[4. Gouvernance & Matrice PMG]
     A --> M5[5. Simulateur de ROI]
     A --> M6[6. Comparateur Diff BPMN]
-   A --> M7[7. Audit Santé BPMN Lint]
 
     M1 --> M1_1[Import 1 à n BPMN]
     M1 --> M1_2[Relations & Hiérarchie]

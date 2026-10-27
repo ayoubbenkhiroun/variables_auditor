@@ -414,7 +414,16 @@
         // Extraction ordonnée des étapes
         const stepSelector = 'startEvent, bpmn\\:startEvent, endEvent, bpmn\\:endEvent, task, bpmn\\:task, serviceTask, bpmn\\:serviceTask, userTask, bpmn\\:userTask, sendTask, bpmn\\:sendTask, receiveTask, bpmn\\:receiveTask, scriptTask, bpmn\\:scriptTask, businessRuleTask, bpmn\\:businessRuleTask, callActivity, bpmn\\:callActivity, exclusiveGateway, bpmn\\:exclusiveGateway, parallelGateway, bpmn\\:parallelGateway, inclusiveGateway, bpmn\\:inclusiveGateway, eventBasedGateway, bpmn\\:eventBasedGateway, intermediateCatchEvent, bpmn\\:intermediateCatchEvent, intermediateThrowEvent, bpmn\\:intermediateThrowEvent, boundaryEvent, bpmn\\:boundaryEvent, subProcess, bpmn\\:subProcess';
 
-        const rawElements = Array.from(procElem.querySelectorAll(stepSelector));
+        const rawElements = Array.from(procElem.querySelectorAll(stepSelector)).filter(el => {
+          if (el.prefix === 'zeebe' || el.prefix === 'camunda' || el.prefix === 'modeler') return false;
+          let p = el.parentElement;
+          while (p && p !== procElem && p.nodeType === 1) {
+            const pLn = (p.localName || '').toLowerCase();
+            if (pLn === 'extensionelements' || pLn === 'extension_elements') return false;
+            p = p.parentElement;
+          }
+          return true;
+        });
         const steps = [];
 
         rawElements.forEach((el, elIdx) => {
@@ -1460,7 +1469,7 @@
       summaryRows.push([p.id, p.name, p.fileName, p.isExecutable ? 'Oui' : 'Non', p.steps.length, p.documentation]);
     });
 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Synthèse Processus');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(summaryRows) : summaryRows), 'Synthèse Processus');
 
     // Onglet 2 : Catalogue des Étapes
     const stepRows = [
@@ -1485,7 +1494,7 @@
       });
     });
 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(stepRows), 'Catalogue Étapes');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(stepRows) : stepRows), 'Catalogue Étapes');
 
     // Onglet 3 : Dictionnaire des Variables I/O
     const varRows = [
@@ -1499,7 +1508,7 @@
       ]);
     });
 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(varRows), 'Dictionnaire Variables');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(window.sanitizeAoA ? window.sanitizeAoA(varRows) : varRows), 'Dictionnaire Variables');
 
     XLSX.writeFile(wb, `specifications_living_doc_${Date.now()}.xlsx`);
   }

@@ -220,20 +220,9 @@
         }
       }
 
-      // 3. Restaurer Module Nommage BPMN
-      if (parsed.data.bpmnNaming) {
-        const n = parsed.data.bpmnNaming;
-        window.bpmnNamingElements = n.elements || [];
-        if (n.rules && n.rules.length > 0) window.bpmnRules = n.rules;
-        if (window.bpmnNamingElements.length > 0) {
-          const bpmnNamingResultsTab = document.getElementById('bpmnNamingResultsTab');
-          if (bpmnNamingResultsTab) bpmnNamingResultsTab.style.display = '';
-        }
-      }
-
-      // 4. Restaurer Module Audit Santé (Lint)
-      if (parsed.data.bpmnLint) {
-        const l = parsed.data.bpmnLint;
+      // 3. Restaurer Module Audit & Santé BPMN (Lint & Nommage)
+      if (parsed.data.bpmnLint || parsed.data.bpmnNaming) {
+        const l = parsed.data.bpmnLint || {};
         window.bpmnLintResults = l.results || [];
         if (l.rules && l.rules.length > 0) window.bpmnLintRules = l.rules;
         if (window.bpmnLintResults.length > 0) {

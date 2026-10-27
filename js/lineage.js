@@ -93,7 +93,16 @@ function extractLineageData() {
  */
 function analyzeDocLineage(doc, procName, map) {
   // Parcourir les tâches et passerelles
-  const tasks = doc.querySelectorAll('task, serviceTask, userTask, sendTask, receiveTask, scriptTask, businessRuleTask, callActivity, intermediateCatchEvent, startEvent');
+  const tasks = Array.from(doc.querySelectorAll('task, bpmn\\:task, serviceTask, bpmn\\:serviceTask, userTask, bpmn\\:userTask, sendTask, bpmn\\:sendTask, receiveTask, bpmn\\:receiveTask, scriptTask, bpmn\\:scriptTask, businessRuleTask, bpmn\\:businessRuleTask, callActivity, bpmn\\:callActivity, intermediateCatchEvent, bpmn\\:intermediateCatchEvent, startEvent, bpmn\\:startEvent')).filter(el => {
+    if (el.prefix === 'zeebe' || el.prefix === 'camunda' || el.prefix === 'modeler') return false;
+    let p = el.parentElement;
+    while (p && p.nodeType === 1) {
+      const pLn = (p.localName || '').toLowerCase();
+      if (pLn === 'extensionelements' || pLn === 'extension_elements') return false;
+      p = p.parentElement;
+    }
+    return true;
+  });
   
   tasks.forEach(task => {
     const taskName = task.getAttribute('name') || task.getAttribute('id') || 'Élément BPMN';
